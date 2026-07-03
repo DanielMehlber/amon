@@ -103,6 +103,8 @@ class TestSessionAndCalibration:
         assert session["status"] == "completed"
         assert session["finished_at"] is not None
         assert session["fps"] == pytest.approx(20.0)
+        assert "-" in session_id
+        assert session["started_at"] > 0
 
     def test_calibration_record(self, db_events):
         db, session_id, _ = db_events
@@ -113,11 +115,12 @@ class TestSessionAndCalibration:
         annotations = calibration["annotations"]
         assert len(annotations["keypoints"]) >= 20
         elements = annotations["hud_elements"]
-        assert len(elements) == 2
+        assert len(elements) == 4
         blink_rates = sorted(e["blink_hz"] for e in elements)
         assert blink_rates[0] == pytest.approx(0.0, abs=0.2)
-        assert blink_rates[1] == pytest.approx(2.0, abs=0.4)
-        assert any("CAM 01" in e["text"] for e in elements)
+        assert blink_rates[-1] == pytest.approx(2.0, abs=0.4)
+        assert any("CAM01" in e["text"] for e in elements)
+        assert any("REC" in e["text"] for e in elements)
 
         thresholds = calibration["thresholds"]
         assert set(thresholds) == {"temporal", "hud", "spatial"}

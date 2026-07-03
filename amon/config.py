@@ -46,6 +46,7 @@ DEFAULTS: dict = {
             "temporal/noise": ["temporal/contrast", "hud/*", "spatial/*"],
             "temporal/contrast": ["hud/*", "spatial/*"],
             "hud/*/size": ["hud/*/text", "hud/*/position"],
+            "hud/*/position": ["hud/*/text"],
         },
     },
     "media": {

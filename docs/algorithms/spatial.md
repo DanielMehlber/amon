@@ -48,8 +48,8 @@ a real warp moves many points.
 
 - Lens vibration misalignment
 - Partial frame buffer corruption
-- Local geometric warping (the synthetic test uses a sinusoidal remap in
-  one region)
+- Local geometric warping (the synthetic test applies a localized affine warp
+  to the infrared landscape)
 
 What it does **not** flag: HUD text edits, global flicker, or noise —
 those have dedicated temporal/HUD detectors.

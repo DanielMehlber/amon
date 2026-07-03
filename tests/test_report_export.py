@@ -21,15 +21,16 @@ class TestHtmlExport:
         config, session_id, db = session_data
         out = export_session(config, session_id, "html", str(tmp_path / "report.html"))
         html = Path(out).read_text(encoding="utf-8", errors="ignore")
+        session = db.get_session(session_id)
 
-        # every event appears in the archive
+        assert html.startswith("<!DOCTYPE html>")
         for event in db.list_events(session_id):
             assert event["anomaly_id"] in html
-        # media is embedded, not referenced: base64 image payloads present
         assert "data:image" in html
-        # bokeh resources are inlined for offline use
-        assert "bokeh" in html.lower()
-        assert Path(out).stat().st_size > 100_000
+        assert "Started:" in html
+        assert session["id"] in html
+        assert Path(out).stat().st_size > 10_000
+        assert "<script" not in html.lower()
 
     def test_default_output_location(self, session_data):
         config, session_id, _ = session_data

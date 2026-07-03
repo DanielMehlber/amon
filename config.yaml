@@ -30,6 +30,7 @@ aggregation:
     temporal/noise: ["temporal/contrast", "hud/*", "spatial/*"]
     temporal/contrast: ["hud/*", "spatial/*"]
     hud/*/size: ["hud/*/text", "hud/*/position"]
+    hud/*/position: ["hud/*/text"]
 
 media:
   max_clip_seconds: 6.0

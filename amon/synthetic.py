@@ -1,17 +1,17 @@
 """Synthetic test video with a precisely known anomaly schedule.
 
-The generated clip shows a static textured scene with two HUD overlays:
-
-- a static label ``CAM 01`` (top-left), and
-- a ``REC`` indicator (top-right) blinking at :data:`BLINK_HZ`.
-
-Anomalies are injected at the timestamps in :data:`SCHEDULE` so integration
-tests can verify detections against ground truth.  All randomness is
-seeded, making the video fully deterministic.
+The generated clip uses :data:`BACKGROUND_IMAGE` (an infrared landscape
+photograph) as the static scene, with a constant low level of sensor noise
+and brightness flicker.  Up to four white text HUD overlays sit at different
+positions.  Anomalies are injected at the timestamps in :data:`SCHEDULE` so
+integration tests can verify detections against ground truth.  All randomness
+is seeded, making the video fully deterministic.
 """
 from __future__ import annotations
 
-from typing import List, Set, Tuple
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Set, Tuple, Union
 
 import cv2
 import numpy as np
@@ -19,9 +19,16 @@ import numpy as np
 WIDTH, HEIGHT = 320, 240
 FPS = 20.0
 DURATION = 86.0
-BLINK_HZ = 2.0
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+#: Infrared landscape photograph in the repository root.
+BACKGROUND_IMAGE = Path(__file__).resolve().parent.parent / "infrared-landscape.png"
+
+# Baseline sensor character (always present; calibration learns these levels).
+BASELINE_NOISE_SIGMA = 4.0
+BASELINE_FLICKER_AMP = 7.0
+BASELINE_FLICKER_HZ = 0.8
 
 #: (anomaly key, start seconds, end seconds).  The first 12 s are clean so
 #: a calibration duration of up to 12 s observes normal footage only.
@@ -39,9 +46,7 @@ SCHEDULE: List[Tuple[str, float, float]] = [
 ]
 
 #: Anomaly ID patterns (``*`` = any element) the default detector set is
-#: expected to report per schedule entry.  HUD element names come from OCR,
-#: so tests match on the anomaly aspect rather than the exact element ID.
-#: In the overlap window flicker must suppress the noise detection.
+#: expected to report per schedule entry.
 EXPECTED_EVENTS = {
     "noise": "temporal/noise",
     "flicker": "temporal/flicker",
@@ -55,45 +60,59 @@ EXPECTED_EVENTS = {
     "overlap_flicker_noise": "temporal/flicker",
 }
 
-#: Region distorted by the "spatial" anomaly (x0, y0, x1, y1).
-WARP_REGION = (195, 135, 275, 205)
+#: Rotation centre for the spatial anomaly — over the bright tree canopy.
+WARP_REGION = (110, 40, 290, 180)
+
+
+@dataclass(frozen=True)
+class HudSpec:
+    """One text-only HUD overlay."""
+
+    key: str
+    text: str
+    org: Tuple[int, int]
+    scale: float
+    blink_hz: float  # 0 = always visible
+
+
+# Four HUD elements spread across the frame for variance.
+HUD_SPECS: Tuple[HudSpec, ...] = (
+    HudSpec("cam", "CAM01", (14, 28), 1.0, 0.0),
+    HudSpec("rec", "REC", (250, 28), 1.0, 2.0),
+    HudSpec("temp", "TEMP22", (118, 28), 0.9, 1.0),
+    HudSpec("stat", "STAT01", (14, 220), 0.85, 0.0),
+)
 
 
 class SyntheticVideo:
     """Renders frames of the synthetic scene for any timestamp."""
 
-    def __init__(self, seed: int = 7):
+    def __init__(self, seed: int = 7, background_path: Optional[Union[str, Path]] = None):
         self.seed = seed
-        self.background = self._make_background(seed)
+        path = Path(background_path) if background_path else BACKGROUND_IMAGE
+        self.background = self._load_background(path)
 
     @staticmethod
-    def _make_background(seed: int) -> np.ndarray:
-        """Textured static scene, brightness capped below HUD whites."""
-        rng = np.random.default_rng(seed)
-        noise = rng.integers(0, 255, (HEIGHT, WIDTH)).astype(np.uint8)
-        base = cv2.GaussianBlur(noise, (0, 0), 8)
-        base = cv2.normalize(base, None, 55, 165, cv2.NORM_MINMAX)
+    def _load_background(path: Path) -> np.ndarray:
+        """Load, centre-crop and resize the infrared landscape to the frame size."""
+        gray = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if gray is None:
+            raise FileNotFoundError(f"cannot load background image: {path}")
 
-        # Deterministic shapes provide corners for feature tracking.
-        cv2.rectangle(base, (40, 60), (100, 110), 60, -1)
-        cv2.rectangle(base, (46, 66), (94, 104), 150, 2)
-        cv2.circle(base, (160, 170), 25, 70, -1)
-        cv2.circle(base, (160, 170), 15, 160, 2)
-        cv2.rectangle(base, (250, 40), (300, 90), 145, -1)
-        cv2.line(base, (250, 40), (300, 90), 60, 2)
+        height, width = gray.shape
+        scale = max(WIDTH / width, HEIGHT / height)
+        resized = cv2.resize(
+            gray,
+            (int(round(width * scale)), int(round(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+        y0 = (resized.shape[0] - HEIGHT) // 2
+        x0 = (resized.shape[1] - WIDTH) // 2
+        crop = resized[y0:y0 + HEIGHT, x0:x0 + WIDTH]
 
-        # Grid texture inside the warp region so distortions are visible.
-        x0, y0, x1, y1 = WARP_REGION
-        for gy in range(y0 + 6, y1, 12):
-            cv2.line(base, (x0, gy), (x1, gy), 170, 1)
-        for gx in range(x0 + 6, x1, 12):
-            cv2.line(base, (gx, y0), (gx, y1), 60, 1)
-
-        # Slight per-channel tint so the scene is not pure grayscale.
-        b = base
-        g = np.clip(base.astype(np.int16) - 8, 0, 255).astype(np.uint8)
-        r = np.clip(base.astype(np.int16) - 15, 0, 255).astype(np.uint8)
-        return cv2.merge([b, g, r])
+        # Leave headroom below pure white so HUD text stands out clearly.
+        crop = np.clip(crop.astype(np.float32) * 0.95, 0, 248).astype(np.uint8)
+        return cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR)
 
     def active(self, t: float) -> Set[str]:
         """Anomaly keys scheduled to be active at time ``t``."""
@@ -105,48 +124,78 @@ class SyntheticVideo:
         return int(t * hz * 2) % 2 == 0
 
     @staticmethod
-    def _draw_label(img: np.ndarray, text: str, org: Tuple[int, int], scale: float) -> None:
-        (tw, th), baseline = cv2.getTextSize(text, FONT, 0.55 * scale, 1)
-        x, y = org
-        cv2.rectangle(img, (x - 4, y - th - 4), (x + tw + 4, y + baseline + 2), (25, 25, 25), -1)
-        cv2.putText(img, text, (x, y), FONT, 0.55 * scale, (255, 255, 255), 1, cv2.LINE_AA)
+    def _draw_text(img: np.ndarray, text: str, org: Tuple[int, int], scale: float) -> None:
+        """White text overlay — no backing plate or icons."""
+        cv2.putText(
+            img, text, org, FONT, 0.6 * scale, (255, 255, 255), 2, cv2.LINE_AA,
+        )
+
+    def _hud_text(self, spec: HudSpec, active: Set[str]) -> str:
+        if spec.key == "cam" and "hud_text" in active:
+            return "ERR42"
+        return spec.text
+
+    def _hud_org(self, spec: HudSpec, active: Set[str]) -> Tuple[int, int]:
+        if spec.key == "cam" and "hud_position" in active:
+            return spec.org[0] + 14, spec.org[1] + 10
+        return spec.org
+
+    def _hud_scale(self, spec: HudSpec, active: Set[str]) -> float:
+        if spec.key == "cam" and "hud_size" in active:
+            return spec.scale * 1.35
+        return spec.scale
+
+    def _hud_visible(self, spec: HudSpec, t: float, active: Set[str]) -> bool:
+        if spec.blink_hz <= 0:
+            return True
+        if spec.key == "rec" and "hud_blink_stop" in active:
+            return True
+        hz = 6.0 if (spec.key == "rec" and "hud_blink_freq" in active) else spec.blink_hz
+        return self._square(t, hz)
+
+    def _apply_noise(self, img: np.ndarray, sigma: float, frame_index: int) -> np.ndarray:
+        rng = np.random.default_rng(self.seed * 100_003 + frame_index)
+        noise = rng.normal(0.0, sigma, img.shape)
+        return np.clip(img.astype(np.float32) + noise, 0, 255).astype(np.uint8)
 
     def frame(self, t: float, index: int = None) -> np.ndarray:
         """Render the BGR frame for timestamp ``t`` (seconds)."""
         active = self.active(t)
+        frame_index = index if index is not None else int(round(t * FPS))
         img = self.background.copy()
 
         if "spatial" in active:
-            x0, y0, x1, y1 = WARP_REGION
-            ys, xs = np.mgrid[y0:y1, x0:x1].astype(np.float32)
-            map_x = xs + 6.0 * np.sin((ys - y0) / 6.0)
-            map_y = ys + 6.0 * np.cos((xs - x0) / 6.0)
-            img[y0:y1, x0:x1] = cv2.remap(img, map_x, map_y, cv2.INTER_LINEAR)
+            cx = (WARP_REGION[0] + WARP_REGION[2]) / 2.0
+            cy = (WARP_REGION[1] + WARP_REGION[3]) / 2.0
+            matrix = cv2.getRotationMatrix2D((cx, cy), 5.0, 1.12)
+            img = cv2.warpAffine(
+                img, matrix, (WIDTH, HEIGHT),
+                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT,
+            )
 
-        # --- HUD overlays -------------------------------------------------
-        label_text = "ERR 42" if "hud_text" in active else "CAM 01"
-        label_org = (26, 30) if "hud_position" in active else (14, 22)
-        label_scale = 1.35 if "hud_size" in active else 1.0
-        self._draw_label(img, label_text, label_org, label_scale)
+        for spec in HUD_SPECS:
+            if self._hud_visible(spec, t, active):
+                self._draw_text(
+                    img,
+                    self._hud_text(spec, active),
+                    self._hud_org(spec, active),
+                    self._hud_scale(spec, active),
+                )
 
-        blink_hz = 6.0 if "hud_blink_freq" in active else BLINK_HZ
-        rec_on = True if "hud_blink_stop" in active else self._square(t, blink_hz)
-        if rec_on:
-            cv2.circle(img, (WIDTH - 78, 16), 4, (255, 255, 255), -1)
-            cv2.putText(img, "REC", (WIDTH - 68, 21), FONT, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-
-        # --- global disturbances ------------------------------------------
         if "contrast" in active:
             mean = img.mean()
             img = np.clip(mean + 0.45 * (img.astype(np.float32) - mean), 0, 255).astype(np.uint8)
+
+        # Constant baseline flicker, plus stronger oscillation during anomalies.
+        flicker = BASELINE_FLICKER_AMP * np.sin(2 * np.pi * BASELINE_FLICKER_HZ * t)
         if "flicker" in active or "overlap_flicker_noise" in active:
-            offset = 40 if self._square(t, 5.0) else -40
-            img = np.clip(img.astype(np.int16) + offset, 0, 255).astype(np.uint8)
+            flicker += 38.0 if self._square(t, 5.0) else -38.0
+        img = np.clip(img.astype(np.float32) + flicker, 0, 255).astype(np.uint8)
+
+        # Constant baseline noise, plus burst noise during anomalies.
+        img = self._apply_noise(img, BASELINE_NOISE_SIGMA, frame_index)
         if "noise" in active or "overlap_flicker_noise" in active:
-            frame_index = index if index is not None else int(round(t * FPS))
-            rng = np.random.default_rng(self.seed * 100003 + frame_index)
-            gauss = rng.normal(0.0, 25.0, img.shape)
-            img = np.clip(img.astype(np.float32) + gauss, 0, 255).astype(np.uint8)
+            img = self._apply_noise(img, 22.0, frame_index + 1_000_000)
         return img
 
 

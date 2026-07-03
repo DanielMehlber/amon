@@ -4,9 +4,9 @@ Exporters are looked up by format name in :data:`EXPORTERS`; adding a new
 format means implementing :class:`Exporter` and registering the class -
 the CLI and report UI pick it up automatically.
 
-The bundled :class:`HtmlArchiveExporter` produces a single standalone HTML
-file: all media is base64-embedded and Bokeh resources are inlined, so the
-archive can be emailed or opened offline.
+The bundled :class:`HtmlArchiveExporter` writes a lightweight standalone
+HTML file with base64-embedded media and static intensity plots — no
+Panel/Bokeh runtime required to open it.
 """
 from __future__ import annotations
 
@@ -14,14 +14,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Optional, Type
 
-import pandas as pd
-import panel as pn
-from bokeh.resources import INLINE
-
 from amon.db import Database
-from amon.plots import intensity_figure
-
-pn.extension()
+from amon.html_export import write_html_report
 
 
 class Exporter(ABC):
@@ -44,44 +38,7 @@ class HtmlArchiveExporter(Exporter):
     suffix = ".html"
 
     def export(self, session: dict, events: list, calibration: Optional[dict], out_path: Path) -> Path:
-        parts = [pn.pane.Markdown(
-            f"# Monitoring report: {session['name']}\n"
-            f"Session `{session['id']}` - status **{session['status']}** - "
-            f"{len(events)} events - source `{session['source']}`"
-        )]
-        parts += self._calibration_section(calibration)
-        parts += self._events_section(events)
-        report = pn.Column(*parts, width=760)
-        report.save(str(out_path), resources=INLINE, embed=True, title=f"amon report {session['id']}")
-        return out_path
-
-    def _calibration_section(self, calibration: Optional[dict]) -> list:
-        if calibration is None:
-            return [pn.pane.Markdown("## Calibration\n*Not recorded.*")]
-        parts = [pn.pane.Markdown("## Calibration")]
-        if calibration["media"] and Path(calibration["media"]).exists():
-            parts.append(pn.pane.Image(calibration["media"], width=480, embed=True))
-        elements = calibration["annotations"].get("hud_elements", [])
-        if elements:
-            parts.append(pn.pane.DataFrame(pd.DataFrame(elements), index=False))
-        parts.append(pn.pane.JSON(calibration["thresholds"], depth=3, name="thresholds"))
-        return parts
-
-    def _events_section(self, events: list) -> list:
-        parts = [pn.pane.Markdown(f"## Events ({len(events)})")]
-        for event in events:
-            parts.append(pn.pane.Markdown(
-                f"### {event['anomaly_id']}\n"
-                f"{event['start']:.2f}s - {event['end']:.2f}s "
-                f"({event['duration']:.2f}s), peak {event['max_intensity']:.3f} "
-                f"vs threshold {event['threshold']:.3f}"
-            ))
-            if event["media"] and Path(event["media"]).exists():
-                parts.append(pn.pane.Image(event["media"], width=480, embed=True))
-            parts.append(pn.pane.Bokeh(intensity_figure(event)))
-            if event["metadata"]:
-                parts.append(pn.pane.JSON(event["metadata"], depth=2))
-        return parts
+        return write_html_report(session, events, calibration, out_path)
 
 
 EXPORTERS: Dict[str, Type[Exporter]] = {

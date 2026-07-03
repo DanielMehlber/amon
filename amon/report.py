@@ -19,6 +19,7 @@ import panel as pn
 
 from amon.db import Database
 from amon.plots import intensity_figure
+from amon.timefmt import format_wall_time
 
 pn.extension(design="material", theme="default")
 
@@ -38,7 +39,11 @@ SORT_OPTIONS = {
 
 def _session_label(session: dict) -> str:
     status = "" if session["status"] == "completed" else f" [{session['status']}]"
-    return f"{session['name']} - {session['id']}{status}"
+    started = format_wall_time(session["started_at"])
+    name = session["name"]
+    if name and name != session["id"]:
+        return f"{session['id']} ({name}) · {started}{status}"
+    return f"{session['id']} · {started}{status}"
 
 
 def _filter_events(
@@ -245,8 +250,11 @@ def export_tab(config: dict, session_id: str) -> pn.Column:
     status = pn.pane.Markdown("")
 
     def run_export(_):
-        path = export_session(config, session_id, format_select.value)
-        status.object = f"Exported to `{path}`"
+        try:
+            path = export_session(config, session_id, format_select.value)
+            status.object = f"Exported to `{path}`"
+        except Exception as exc:
+            status.object = f"**Export failed:** {exc}"
 
     button.on_click(run_export)
     return pn.Column(format_select, button, status)
@@ -263,10 +271,15 @@ def session_view(config: dict, session_id: str) -> pn.Column:
         db.close()
 
     status_color = ACCENT if session["status"] == "running" else "#2e7d32"
+    finished = ""
+    if session.get("finished_at"):
+        finished = f" · finished {format_wall_time(session['finished_at'])}"
     header = pn.pane.Markdown(
-        f"## {session['name']}\n"
+        f"## {session['id']}\n"
+        f"**Started** {format_wall_time(session['started_at'])}{finished}  \n"
         f"<span style='color:{status_color};font-weight:600'>{session['status'].upper()}</span>"
-        f" · **{len(events)}** anomalies · source `{session['source']}`",
+        f" · **{len(events)}** anomalies · source `{session['source']}`"
+        + (f" · config `{session['name']}`" if session.get("name") and session["name"] != session["id"] else ""),
     )
     body = pn.Tabs(
         ("Anomalies", events_tab(events) if events else pn.pane.Markdown("*No anomalies recorded.*")),

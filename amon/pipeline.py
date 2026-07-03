@@ -18,7 +18,6 @@ The pipeline runs until the source is exhausted or ``stop`` is set.
 from __future__ import annotations
 
 import logging
-import uuid
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -29,6 +28,7 @@ from amon.aggregate import EventAggregator, Reading
 from amon.db import Database
 from amon.detectors import Detector
 from amon.model import AnomalyEvent, Frame
+from amon.names import generate_session_id
 from amon.plugins import instantiate
 from amon.sources import VideoSource
 from amon.worker import BackgroundWorker
@@ -59,7 +59,7 @@ class Pipeline:
             instantiate(spec) for spec in config["detectors"]
         ]
         self.aggregator = EventAggregator(config["aggregation"])
-        self.session_id = uuid.uuid4().hex[:12]
+        self.session_id: Optional[str] = None
 
         data_dir = Path(config["data_dir"])
         self.db_path = data_dir / "amon.sqlite"
@@ -80,6 +80,8 @@ class Pipeline:
         ring: deque = deque(maxlen=int(max(self._lead, CALIBRATION_CLIP_SECONDS) * fps) + 4)
 
         db = Database(self.db_path)
+        existing = {row["id"] for row in db.list_sessions()}
+        self.session_id = generate_session_id(existing=existing)
         db.create_session(self.session_id, self.config["session_name"],
                           str(self.config["video_source"].get("config", {}).get("path", "")), fps)
         db.close()
