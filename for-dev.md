@@ -69,6 +69,10 @@ same pattern and be referenced from the config.
 
 ## Image-processing algorithms
 
+Intuition-first explanations for developers new to computer vision live in
+the [algorithm knowledge base](docs/README.md). The sections below focus on
+how those techniques are wired into this codebase.
+
 ### Threshold calibration (`amon/stats.py`)
 
 All detectors collect intensity samples on clean calibration footage and

@@ -10,6 +10,8 @@ export. Runs fully offline.
   configuration, running, reports, export.
 - **Developer guide:** [for-dev.md](for-dev.md) - architecture,
   algorithms, plugin interfaces, design rationale.
+- **Algorithm knowledge base:** [docs/](docs/) - intuition-first
+  explanations of the CV techniques used.
 
 ## Quick start
 
