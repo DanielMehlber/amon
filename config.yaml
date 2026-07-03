@@ -1,0 +1,43 @@
+# amon configuration - every key is optional except video_source.config.path.
+# Values shown here are the framework defaults (see amon/config.py).
+
+session_name: demo
+data_dir: data
+
+video_source:
+  class: amon.sources.file.VideoFileSource
+  config:
+    path: test-video.avi   # change this to your video
+    realtime: false        # true paces playback like a live stream
+
+calibration:
+  duration_seconds: 10.0
+
+detectors:
+  - class: amon.detectors.temporal.TemporalDetector
+    config: {}
+  - class: amon.detectors.hud.HudDetector
+    config: {}
+  - class: amon.detectors.spatial.SpatialDetector
+    config: {}
+
+aggregation:
+  cooldown_seconds: 1.0
+  min_duration_seconds: 0.5
+  # Exclusion hierarchy: primary anomalies suppress their side-effects.
+  suppresses:
+    temporal/flicker: ["*"]
+    temporal/noise: ["temporal/contrast", "hud/*", "spatial/*"]
+    temporal/contrast: ["hud/*", "spatial/*"]
+    hud/*/size: ["hud/*/text", "hud/*/position"]
+
+media:
+  max_clip_seconds: 6.0
+  lead_seconds: 1.0
+  gif_max_fps: 10.0
+
+report:
+  port: 5006
+
+export:
+  format: html

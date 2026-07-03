@@ -1,0 +1,10 @@
+# Runtime dependencies (compile with: pip-compile requirements.in)
+opencv-python-headless
+numpy
+pyyaml
+pillow
+panel
+pandas
+
+# Test dependencies
+pytest
