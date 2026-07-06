@@ -1,4 +1,5 @@
 """Unit tests for the video source abstraction."""
+
 import pytest
 
 from amon.sources import SourceError

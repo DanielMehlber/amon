@@ -1,4 +1,5 @@
 """Tests for GitHub-style session codenames."""
+
 from amon.names import generate_session_id
 
 

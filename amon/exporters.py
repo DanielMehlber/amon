@@ -8,6 +8,7 @@ The bundled :class:`HtmlArchiveExporter` writes a lightweight standalone
 HTML file with base64-embedded media and static intensity plots — no
 Panel/Bokeh runtime required to open it.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -27,7 +28,9 @@ class Exporter(ABC):
     suffix: str = ""
 
     @abstractmethod
-    def export(self, session: dict, events: list, calibration: Optional[dict], out_path: Path) -> Path:
+    def export(
+        self, session: dict, events: list, calibration: Optional[dict], out_path: Path
+    ) -> Path:
         """Write the report for one session to ``out_path``."""
 
 
@@ -37,7 +40,9 @@ class HtmlArchiveExporter(Exporter):
     format = "html"
     suffix = ".html"
 
-    def export(self, session: dict, events: list, calibration: Optional[dict], out_path: Path) -> Path:
+    def export(
+        self, session: dict, events: list, calibration: Optional[dict], out_path: Path
+    ) -> Path:
         return write_html_report(session, events, calibration, out_path)
 
 
@@ -46,12 +51,18 @@ EXPORTERS: Dict[str, Type[Exporter]] = {
 }
 
 
-def export_session(config: dict, session_id: str, fmt: Optional[str] = None,
-                   out_path: Optional[str] = None) -> Path:
+def export_session(
+    config: dict,
+    session_id: str,
+    fmt: Optional[str] = None,
+    out_path: Optional[str] = None,
+) -> Path:
     """Export one session's report; returns the written file path."""
     fmt = fmt or config["export"]["format"]
     if fmt not in EXPORTERS:
-        raise ValueError(f"unknown export format '{fmt}' (available: {', '.join(EXPORTERS)})")
+        raise ValueError(
+            f"unknown export format '{fmt}' (available: {', '.join(EXPORTERS)})"
+        )
     exporter = EXPORTERS[fmt]()
 
     db = Database(Path(config["data_dir"]) / "amon.sqlite")

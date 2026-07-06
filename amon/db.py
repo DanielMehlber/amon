@@ -6,6 +6,7 @@ relative paths, so the whole data directory can be archived or moved.
 Timestamps of events are stored in seconds relative to the session start;
 the session row carries the absolute wall-clock start time.
 """
+
 from __future__ import annotations
 
 import json
@@ -66,7 +67,9 @@ class Database:
         self._conn.close()
 
     # --- sessions -----------------------------------------------------------
-    def create_session(self, session_id: str, name: str, source: str, fps: float) -> None:
+    def create_session(
+        self, session_id: str, name: str, source: str, fps: float
+    ) -> None:
         self._conn.execute(
             "INSERT INTO sessions (id, name, started_at, source, fps) VALUES (?, ?, ?, ?, ?)",
             (session_id, name, time.time(), source, fps),
@@ -81,19 +84,34 @@ class Database:
         self._conn.commit()
 
     def list_sessions(self) -> List[dict]:
-        rows = self._conn.execute("SELECT * FROM sessions ORDER BY started_at DESC").fetchall()
+        rows = self._conn.execute(
+            "SELECT * FROM sessions ORDER BY started_at DESC"
+        ).fetchall()
         return [dict(r) for r in rows]
 
     def get_session(self, session_id: str) -> Optional[dict]:
-        row = self._conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        row = self._conn.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
         return dict(row) if row else None
 
     # --- calibration -----------------------------------------------------------
-    def save_calibration(self, session_id: str, thresholds: dict, annotations: dict,
-                         media: Optional[str] = None) -> None:
+    def save_calibration(
+        self,
+        session_id: str,
+        thresholds: dict,
+        annotations: dict,
+        media: Optional[str] = None,
+    ) -> None:
         self._conn.execute(
             "INSERT OR REPLACE INTO calibrations VALUES (?, ?, ?, ?, ?)",
-            (session_id, time.time(), json.dumps(thresholds), json.dumps(annotations), media),
+            (
+                session_id,
+                time.time(),
+                json.dumps(thresholds),
+                json.dumps(annotations),
+                media,
+            ),
         )
         self._conn.commit()
 
@@ -109,16 +127,26 @@ class Database:
         return data
 
     # --- events -------------------------------------------------------------
-    def insert_event(self, session_id: str, event: AnomalyEvent, media: Optional[str] = None) -> int:
+    def insert_event(
+        self, session_id: str, event: AnomalyEvent, media: Optional[str] = None
+    ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO events (session_id, anomaly_id, detector, start, end, duration,"
             " max_intensity, threshold, timeline, metadata, regions, media)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                session_id, event.anomaly_id, event.detector, event.start, event.end,
-                event.duration, event.max_intensity, event.threshold,
-                json.dumps(event.timeline), json.dumps(event.metadata),
-                json.dumps(event.regions), media,
+                session_id,
+                event.anomaly_id,
+                event.detector,
+                event.start,
+                event.end,
+                event.duration,
+                event.max_intensity,
+                event.threshold,
+                json.dumps(event.timeline),
+                json.dumps(event.metadata),
+                json.dumps(event.regions),
+                media,
             ),
         )
         self._conn.commit()
@@ -131,7 +159,9 @@ class Database:
         return [self._decode_event(r) for r in rows]
 
     def get_event(self, event_id: int) -> Optional[dict]:
-        row = self._conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        row = self._conn.execute(
+            "SELECT * FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
         return self._decode_event(row) if row else None
 
     @staticmethod

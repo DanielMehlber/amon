@@ -7,6 +7,7 @@ Commands:
 - ``export <config> --session <id>``: export a session report.
 - ``synth <path>``: generate the synthetic test video.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,12 +18,16 @@ from amon.config import load_config
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="amon", description="Video anomaly monitoring framework")
+    parser = argparse.ArgumentParser(
+        prog="amon", description="Video anomaly monitoring framework"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_monitor = sub.add_parser("monitor", help="run a monitoring session")
     p_monitor.add_argument("config", help="path to the YAML configuration file")
-    p_monitor.add_argument("--max-frames", type=int, default=None, help="stop after N frames")
+    p_monitor.add_argument(
+        "--max-frames", type=int, default=None, help="stop after N frames"
+    )
 
     p_report = sub.add_parser("report", help="launch the report UI in the browser")
     p_report.add_argument("config", help="path to the YAML configuration file")
@@ -30,7 +35,9 @@ def main(argv=None) -> int:
     p_export = sub.add_parser("export", help="export a session report")
     p_export.add_argument("config", help="path to the YAML configuration file")
     p_export.add_argument("--session", required=True, help="session ID to export")
-    p_export.add_argument("--format", default=None, help="export format (default: from config)")
+    p_export.add_argument(
+        "--format", default=None, help="export format (default: from config)"
+    )
     p_export.add_argument("--output", default=None, help="output file path")
 
     p_synth = sub.add_parser("synth", help="generate the synthetic test video")

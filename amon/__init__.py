@@ -1,4 +1,4 @@
-"""amon - a lightweight anomaly-monitoring framework for static video scenes.
+"""AMON - A lightweight anomaly-monitoring framework for static video scenes.
 
 The package is organised as a small framework:
 

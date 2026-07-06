@@ -1,4 +1,5 @@
 """Unit tests for stats, config, plugin loading and the OCR helper."""
+
 import numpy as np
 import pytest
 
@@ -49,10 +50,12 @@ class TestPlugins:
         assert cls.__name__ == "TemporalDetector"
 
     def test_instantiate_passes_config(self):
-        detector = instantiate({
-            "class": "amon.detectors.temporal.TemporalDetector",
-            "config": {"noise_floor": 9.0},
-        })
+        detector = instantiate(
+            {
+                "class": "amon.detectors.temporal.TemporalDetector",
+                "config": {"noise_floor": 9.0},
+            }
+        )
         assert detector.config["noise_floor"] == 9.0
         assert detector.mode == "calibration"
 
@@ -66,7 +69,16 @@ class TestPlugins:
 class TestTextOcr:
     def test_reads_rendered_text(self):
         canvas = np.zeros((40, 200), np.uint8)
-        cv2.putText(canvas, "CAM 01", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.55, 255, 1, cv2.LINE_AA)
+        cv2.putText(
+            canvas,
+            "CAM 01",
+            (10, 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            255,
+            1,
+            cv2.LINE_AA,
+        )
         assert read_text(canvas) == "CAM 01"
 
     def test_empty_image_reads_empty(self):

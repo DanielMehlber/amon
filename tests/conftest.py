@@ -1,4 +1,5 @@
 """Shared fixtures: synthetic test video and a completed monitoring session."""
+
 from __future__ import annotations
 
 import pytest
@@ -45,14 +46,16 @@ def completed_session(synthetic_video, tmp_path_factory):
     from amon.pipeline import Pipeline
 
     data_dir = tmp_path_factory.mktemp("data")
-    config = merge_defaults({
-        "session_name": "e2e",
-        "data_dir": str(data_dir),
-        "video_source": {
-            "class": "amon.sources.file.VideoFileSource",
-            "config": {"path": synthetic_video},
-        },
-        "calibration": {"duration_seconds": 10.0},
-    })
+    config = merge_defaults(
+        {
+            "session_name": "e2e",
+            "data_dir": str(data_dir),
+            "video_source": {
+                "class": "amon.sources.file.VideoFileSource",
+                "config": {"path": synthetic_video},
+            },
+            "calibration": {"duration_seconds": 10.0},
+        }
+    )
     session_id = Pipeline(config).run()
     return config, session_id

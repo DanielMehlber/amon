@@ -1,13 +1,16 @@
 """Unit tests for event aggregation and the suppression hierarchy."""
+
 import pytest
 
 from amon.aggregate import EventAggregator, Reading, SuppressionRules
 
-RULES = SuppressionRules({
-    "temporal/flicker": ["*"],
-    "temporal/noise": ["temporal/contrast", "hud/*"],
-    "hud/*/size": ["hud/*/text", "hud/*/position"],
-})
+RULES = SuppressionRules(
+    {
+        "temporal/flicker": ["*"],
+        "temporal/noise": ["temporal/contrast", "hud/*"],
+        "hud/*/size": ["hud/*/text", "hud/*/position"],
+    }
+)
 
 
 class TestSuppressionRules:
@@ -66,7 +69,9 @@ class TestEventAggregator:
     def test_short_glitch_is_discarded(self):
         agg = make_aggregator()
         times = [i * 0.1 for i in range(50)]
-        opened, closed, discarded = feed(agg, times, lambda t: 5.0 if 2.0 <= t < 2.2 else 0.0)
+        opened, closed, discarded = feed(
+            agg, times, lambda t: 5.0 if 2.0 <= t < 2.2 else 0.0
+        )
         assert opened == ["a"]
         assert closed == []
         assert discarded == ["a"]
@@ -90,10 +95,13 @@ class TestEventAggregator:
         agg = make_aggregator(suppresses={"primary": ["secondary"]})
         for i in range(30):
             t = i * 0.1
-            agg.update(t, {
-                "primary": Reading(5.0, 1.0, "det"),
-                "secondary": Reading(5.0, 1.0, "det"),
-            })
+            agg.update(
+                t,
+                {
+                    "primary": Reading(5.0, 1.0, "det"),
+                    "secondary": Reading(5.0, 1.0, "det"),
+                },
+            )
         closed = agg.flush()
         assert [e.anomaly_id for e in closed] == ["primary"]
 

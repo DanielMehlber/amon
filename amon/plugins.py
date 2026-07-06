@@ -5,6 +5,7 @@ their dotted class path, e.g. ``amon.detectors.temporal.TemporalDetector``.
 New plugins therefore require no changes to the core application: implement
 the interface anywhere on the Python path and reference it in the config.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -20,7 +21,9 @@ def load_class(dotted_path: str) -> type:
     try:
         return getattr(module, class_name)
     except AttributeError as exc:
-        raise ImportError(f"module '{module_path}' has no class '{class_name}'") from exc
+        raise ImportError(
+            f"module '{module_path}' has no class '{class_name}'"
+        ) from exc
 
 
 def instantiate(spec: dict) -> Any:

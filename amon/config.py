@@ -5,6 +5,7 @@ the repository root).  Every value has a default so a minimal config only
 needs to name a video file.  Detectors and video sources are specified as
 ``{"class": "<dotted path>", "config": {...}}`` plugin specs.
 """
+
 from __future__ import annotations
 
 import copy
@@ -50,8 +51,8 @@ DEFAULTS: dict = {
         },
     },
     "media": {
-        "max_clip_seconds": 6.0,   # long events are clipped to this length
-        "lead_seconds": 1.0,       # context recorded before the event start
+        "max_clip_seconds": 6.0,  # long events are clipped to this length
+        "lead_seconds": 1.0,  # context recorded before the event start
         "gif_max_fps": 10.0,
     },
     "report": {

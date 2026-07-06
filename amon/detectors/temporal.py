@@ -20,6 +20,7 @@ Thresholds are derived from calibration samples via
 :func:`amon.stats.robust_threshold`; the configurable floors only encode
 the physical scale of each metric.
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -45,10 +46,10 @@ class TemporalDetector(Detector):
     @classmethod
     def default_config(cls) -> dict:
         return {
-            "window_seconds": 0.5,   # sliding window for the flicker metric
-            "sigma_k": 8.0,          # threshold distance in robust sigmas
-            "noise_floor": 3.0,      # minimum noise threshold (gray levels)
-            "flicker_floor": 5.0,    # minimum flicker threshold (gray levels)
+            "window_seconds": 0.5,  # sliding window for the flicker metric
+            "sigma_k": 8.0,  # threshold distance in robust sigmas
+            "noise_floor": 3.0,  # minimum noise threshold (gray levels)
+            "flicker_floor": 5.0,  # minimum flicker threshold (gray levels)
             "contrast_floor": 0.15,  # minimum relative contrast deviation
         }
 
@@ -90,11 +91,19 @@ class TemporalDetector(Detector):
     def _finish_calibration(self) -> CalibrationResult:
         sigma_k = float(self.config["sigma_k"])
         self._baseline_std = float(np.median(self._std_samples)) or 1.0
-        contrast_samples = [abs(s / self._baseline_std - 1.0) for s in self._std_samples]
+        contrast_samples = [
+            abs(s / self._baseline_std - 1.0) for s in self._std_samples
+        ]
         thresholds = {
-            NOISE: robust_threshold(self._samples[NOISE], sigma_k, self.config["noise_floor"]),
-            FLICKER: robust_threshold(self._samples[FLICKER], sigma_k, self.config["flicker_floor"]),
-            CONTRAST: robust_threshold(contrast_samples, sigma_k, self.config["contrast_floor"]),
+            NOISE: robust_threshold(
+                self._samples[NOISE], sigma_k, self.config["noise_floor"]
+            ),
+            FLICKER: robust_threshold(
+                self._samples[FLICKER], sigma_k, self.config["flicker_floor"]
+            ),
+            CONTRAST: robust_threshold(
+                contrast_samples, sigma_k, self.config["contrast_floor"]
+            ),
         }
         annotations = {"temporal": {"baseline_std": self._baseline_std}}
         return CalibrationResult(thresholds=thresholds, annotations=annotations)
@@ -108,4 +117,8 @@ class TemporalDetector(Detector):
         }
 
     def metadata(self, anomaly_id: str) -> dict:
-        return {"baseline_std": round(self._baseline_std, 2)} if anomaly_id == CONTRAST else {}
+        return (
+            {"baseline_std": round(self._baseline_std, 2)}
+            if anomaly_id == CONTRAST
+            else {}
+        )

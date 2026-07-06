@@ -5,6 +5,7 @@ The synthetic video's anomaly schedule is the ground truth; the pipeline
 reproduce it: one event per scheduled anomaly, correct timing, media on
 disk and no false positives.
 """
+
 from pathlib import Path
 
 import pytest
@@ -37,18 +38,22 @@ class TestEventDetection:
         for key, start, end in SCHEDULE:
             pattern = EXPECTED_EVENTS[key]
             hits = [
-                e for e in events
+                e
+                for e in events
                 if matches(e["anomaly_id"], pattern)
                 and abs(e["start"] - start) <= START_TOLERANCE
                 and abs(e["end"] - end) <= END_TOLERANCE
             ]
-            assert len(hits) == 1, f"{key}: expected 1 event matching {pattern}, got {hits}"
+            assert (
+                len(hits) == 1
+            ), f"{key}: expected 1 event matching {pattern}, got {hits}"
 
     def test_no_unexpected_events(self, db_events):
         _, _, events = db_events
         for event in events:
             windows = [
-                (start, end) for key, start, end in SCHEDULE
+                (start, end)
+                for key, start, end in SCHEDULE
                 if matches(event["anomaly_id"], EXPECTED_EVENTS[key])
             ]
             assert any(
@@ -59,17 +64,24 @@ class TestEventDetection:
 
     def test_suppression_removed_noise_during_overlap(self, db_events):
         _, _, events = db_events
-        overlap = next(entry for entry in SCHEDULE if entry[0] == "overlap_flicker_noise")
+        overlap = next(
+            entry for entry in SCHEDULE if entry[0] == "overlap_flicker_noise"
+        )
         noise_events = [
-            e for e in events
-            if e["anomaly_id"] == "temporal/noise" and e["end"] > overlap[1] - 1 and e["start"] < overlap[2] + 1
+            e
+            for e in events
+            if e["anomaly_id"] == "temporal/noise"
+            and e["end"] > overlap[1] - 1
+            and e["start"] < overlap[2] + 1
         ]
         assert noise_events == []
 
     def test_durations_are_calculated(self, db_events):
         _, _, events = db_events
         for event in events:
-            assert event["duration"] == pytest.approx(event["end"] - event["start"], abs=1e-6)
+            assert event["duration"] == pytest.approx(
+                event["end"] - event["start"], abs=1e-6
+            )
             assert event["duration"] > 0
 
 

@@ -1,4 +1,4 @@
-# amon - video anomaly monitoring framework
+# AMON - video anomaly monitoring framework
 
 Monitors a video stream of a static scene, calibrates itself
 automatically, detects temporal / HUD / spatial anomalies and records

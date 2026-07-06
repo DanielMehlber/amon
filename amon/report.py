@@ -10,6 +10,7 @@ Layout: a session selector at the top, below it three tabs -
 
 All widgets are Panel components; no HTML is written by hand.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -61,10 +62,16 @@ def _filter_events(
             continue
         if event["duration"] < min_duration:
             continue
-        if query and query not in event["anomaly_id"].lower() and query not in event["detector"].lower():
+        if (
+            query
+            and query not in event["anomaly_id"].lower()
+            and query not in event["detector"].lower()
+        ):
             continue
         chosen.append(event)
-    chosen.sort(key=SORT_OPTIONS.get(sort_key, SORT_OPTIONS["Start time (earliest first)"]))
+    chosen.sort(
+        key=SORT_OPTIONS.get(sort_key, SORT_OPTIONS["Start time (earliest first)"])
+    )
     return chosen
 
 
@@ -94,7 +101,8 @@ def event_detail(event: dict) -> pn.Column:
     media_pane = None
     if event["media"] and Path(event["media"]).exists():
         media_pane = pn.pane.Image(
-            event["media"], width=400,
+            event["media"],
+            width=400,
             styles={"border": f"2px solid {ACCENT}", "border-radius": "6px"},
         )
 
@@ -134,7 +142,8 @@ def _event_catalog(
         active=[],
         toggle=True,
         sizing_mode="stretch_width",
-        stylesheets=[f"""
+        stylesheets=[
+            f"""
             :host .accordion-button {{
                 font-weight: 600;
             }}
@@ -142,7 +151,8 @@ def _event_catalog(
                 color: {ACCENT_DARK};
                 background-color: {ACCENT_LIGHT};
             }}
-        """],
+        """
+        ],
     )
     return pn.Column(
         pn.pane.Markdown(
@@ -168,15 +178,26 @@ def events_tab(events: list) -> pn.Column:
     max_duration = max([e["duration"] for e in events] + [1.0])
 
     search = pn.widgets.TextInput(
-        name="Search", placeholder="Filter by anomaly or detector…", sizing_mode="stretch_width",
+        name="Search",
+        placeholder="Filter by anomaly or detector…",
+        sizing_mode="stretch_width",
     )
     type_filter = pn.widgets.MultiChoice(
-        name="Anomaly type", options=types, value=[], sizing_mode="stretch_width",
+        name="Anomaly type",
+        options=types,
+        value=[],
+        sizing_mode="stretch_width",
     )
     min_duration = pn.widgets.FloatSlider(
-        name="Min duration (s)", start=0.0, end=max_duration, step=0.1, value=0.0,
+        name="Min duration (s)",
+        start=0.0,
+        end=max_duration,
+        step=0.1,
+        value=0.0,
     )
-    sort_by = pn.widgets.Select(name="Sort by", options=list(SORT_OPTIONS), value="Start time (earliest first)")
+    sort_by = pn.widgets.Select(
+        name="Sort by", options=list(SORT_OPTIONS), value="Start time (earliest first)"
+    )
 
     filters = pn.Row(
         pn.Column(search, sizing_mode="stretch_width"),
@@ -224,8 +245,14 @@ def calibration_tab(calibration: dict) -> pn.Column:
     if calibration["media"] and Path(calibration["media"]).exists():
         parts.append(
             pn.pane.Image(
-                calibration["media"], width=520,
-                styles={"border": f"2px solid {ACCENT}", "border-radius": "6px", "display": "block", "margin": "0 auto"},
+                calibration["media"],
+                width=520,
+                styles={
+                    "border": f"2px solid {ACCENT}",
+                    "border-radius": "6px",
+                    "display": "block",
+                    "margin": "0 auto",
+                },
             )
         )
 
@@ -235,7 +262,11 @@ def calibration_tab(calibration: dict) -> pn.Column:
         parts.extend(_hud_element_card(element) for element in elements)
 
     keypoints = calibration["annotations"].get("keypoints", [])
-    parts.append(pn.pane.Markdown(f"#### Feature points\n**{len(keypoints)}** stable corners tracked for spatial detection."))
+    parts.append(
+        pn.pane.Markdown(
+            f"#### Feature points\n**{len(keypoints)}** stable corners tracked for spatial detection."
+        )
+    )
 
     parts.append(pn.pane.Markdown("#### Calibrated thresholds"))
     parts.append(pn.pane.JSON(calibration["thresholds"], depth=3))
@@ -279,10 +310,21 @@ def session_view(config: dict, session_id: str) -> pn.Column:
         f"**Started** {format_wall_time(session['started_at'])}{finished}  \n"
         f"<span style='color:{status_color};font-weight:600'>{session['status'].upper()}</span>"
         f" · **{len(events)}** anomalies · source `{session['source']}`"
-        + (f" · config `{session['name']}`" if session.get("name") and session["name"] != session["id"] else ""),
+        + (
+            f" · config `{session['name']}`"
+            if session.get("name") and session["name"] != session["id"]
+            else ""
+        ),
     )
     body = pn.Tabs(
-        ("Anomalies", events_tab(events) if events else pn.pane.Markdown("*No anomalies recorded.*")),
+        (
+            "Anomalies",
+            (
+                events_tab(events)
+                if events
+                else pn.pane.Markdown("*No anomalies recorded.*")
+            ),
+        ),
         ("Calibration", calibration_tab(calibration)),
         ("Export", export_tab(config, session_id)),
         tabs_location="above",
@@ -304,7 +346,8 @@ def build_app(config: dict):
         theme="default",
         header_background=ACCENT_DARK,
     )
-    template.config.raw_css.append(f"""
+    template.config.raw_css.append(
+        f"""
         .bk-btn.bk-btn-primary {{
             background-color: {ACCENT};
             border-color: {ACCENT_DARK};
@@ -312,18 +355,23 @@ def build_app(config: dict):
         .bk-btn.bk-btn-primary:hover {{
             background-color: {ACCENT_DARK};
         }}
-    """)
+    """
+    )
     if not sessions:
         template.main.append(pn.pane.Markdown("## No monitoring sessions found."))
         return template
 
     options = {_session_label(s): s["id"] for s in sessions}
-    session_select = pn.widgets.Select(name="Monitoring session", options=options, width=400)
-    template.main.append(pn.Column(
-        pn.Row(session_select, sizing_mode="stretch_width"),
-        pn.bind(lambda sid: session_view(config, sid), session_select),
-        sizing_mode="stretch_width",
-    ))
+    session_select = pn.widgets.Select(
+        name="Monitoring session", options=options, width=400
+    )
+    template.main.append(
+        pn.Column(
+            pn.Row(session_select, sizing_mode="stretch_width"),
+            pn.bind(lambda sid: session_view(config, sid), session_select),
+            sizing_mode="stretch_width",
+        )
+    )
     return template
 
 

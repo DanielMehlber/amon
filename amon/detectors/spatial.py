@@ -2,13 +2,13 @@
 
 During calibration the detector builds a *baseline image* as the temporal
 median of sampled calibration frames (removing transient content) and
-detects stable Shi-Tomasi corner features on it.  Pixels that were ever
+detects stable Shi-Tomasi corner features on it. Pixels that were ever
 bright during calibration - HUD overlays - are dilated and excluded, so
 HUD changes never influence this detector.
 
 In detection mode every feature point is tracked from the baseline image
 into the current frame with pyramidal Lucas-Kanade optical flow.  A
-forward-backward consistency check discards unreliable tracks.  The
+forward-backward consistency check discards unreliable tracks. The
 anomaly intensity ``spatial/distortion`` is the third-largest point
 displacement in pixels: a genuine distortion moves a cluster of points,
 while the ranking makes single-point outliers harmless.
@@ -16,6 +16,7 @@ while the ranking makes single-point outliers harmless.
 The detection threshold is calibrated by measuring displacement jitter of
 the calibration frames against the baseline.
 """
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional
@@ -38,17 +39,17 @@ class SpatialDetector(Detector):
     @classmethod
     def default_config(cls) -> dict:
         return {
-            "bright_threshold": 220,   # HUD brightness (matches HudDetector)
-            "exclusion_dilate": 21,    # px dilation around HUD pixels
+            "bright_threshold": 220,  # HUD brightness (matches HudDetector)
+            "exclusion_dilate": 21,  # px dilation around HUD pixels
             "max_corners": 150,
             "corner_quality": 0.03,
             "corner_min_distance": 7,
-            "max_baseline_frames": 40, # calibration frames kept for the median
-            "fb_max_error": 1.5,       # forward-backward tolerance (px)
-            "outlier_rank": 3,         # use the k-th largest displacement
+            "max_baseline_frames": 40,  # calibration frames kept for the median
+            "fb_max_error": 1.5,  # forward-backward tolerance (px)
+            "outlier_rank": 3,  # use the k-th largest displacement
             "sigma_k": 8.0,
-            "floor": 2.5,              # minimum displacement threshold (px)
-            "region_size": 28,         # highlight box size around moved points
+            "floor": 2.5,  # minimum displacement threshold (px)
+            "region_size": 28,  # highlight box size around moved points
         }
 
     def __init__(self, config: dict = None):
@@ -75,6 +76,9 @@ class SpatialDetector(Detector):
 
         kernel = np.ones((self.config["exclusion_dilate"],) * 2, np.uint8)
         excluded = cv2.dilate(self._bright.astype(np.uint8), kernel)
+
+        # Find the corner features in the baseline image
+        # using Shi-Tomasi corner detection (which is the default)
         self._points = cv2.goodFeaturesToTrack(
             self._baseline,
             maxCorners=int(self.config["max_corners"]),
@@ -83,32 +87,54 @@ class SpatialDetector(Detector):
             mask=(1 - excluded) * 255,
         )
 
-        jitter = [self._displacement(g) for g in samples]
+        jitter = [self._calculate_keypoint_displacement(g) for g in samples]
         thresholds = {
-            DISTORTION: robust_threshold(jitter, self.config["sigma_k"], self.config["floor"])
+            DISTORTION: robust_threshold(
+                jitter, self.config["sigma_k"], self.config["floor"]
+            )
         }
         keypoints = [] if self._points is None else self._points.reshape(-1, 2).tolist()
         self._grays = []  # free calibration memory
-        return CalibrationResult(thresholds=thresholds, annotations={"keypoints": keypoints})
+        return CalibrationResult(
+            thresholds=thresholds, annotations={"keypoints": keypoints}
+        )
 
     # --- detection ----------------------------------------------------------
     def _detect(self, frame: Frame) -> Dict[str, float]:
         gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
-        return {DISTORTION: self._displacement(gray, record_regions=True)}
+        return {
+            DISTORTION: self._calculate_keypoint_displacement(gray, record_regions=True)
+        }
 
-    def _displacement(self, gray: np.ndarray, record_regions: bool = False) -> float:
+    def _calculate_keypoint_displacement(
+        self, gray: np.ndarray, record_regions: bool = False
+    ) -> float:
         """Rank-filtered maximum displacement of baseline features in ``gray``."""
         if self._points is None or len(self._points) == 0:
             return 0.0
-        fwd, st_f, _ = cv2.calcOpticalFlowPyrLK(self._baseline, gray, self._points, None)
+
+        # Calculate the forward and backward optical flow of the tracked keypoints
+        # between the baseline image and the current frame.
+        fwd, st_f, _ = cv2.calcOpticalFlowPyrLK(
+            self._baseline, gray, self._points, None
+        )
         back, st_b, _ = cv2.calcOpticalFlowPyrLK(gray, self._baseline, fwd, None)
+
+        # Calculate the forward-backward error.
         fb_error = np.linalg.norm((back - self._points).reshape(-1, 2), axis=1)
-        valid = (st_f.ravel() == 1) & (st_b.ravel() == 1) & (fb_error < self.config["fb_max_error"])
+        valid = (
+            (st_f.ravel() == 1)
+            & (st_b.ravel() == 1)
+            & (fb_error < self.config["fb_max_error"])
+        )
         if not valid.any():
             return 0.0
+
+        # Calculate the displacement of the tracked keypoints.
         displacement = np.linalg.norm((fwd - self._points).reshape(-1, 2), axis=1)
         displacement[~valid] = 0.0
 
+        # Record the regions of the moved keypoints.
         if record_regions:
             threshold = self._thresholds.get(DISTORTION, np.inf)
             half = int(self.config["region_size"]) // 2
@@ -117,6 +143,10 @@ class SpatialDetector(Detector):
                 for (x, y), d in zip(self._points.reshape(-1, 2), displacement)
                 if d >= threshold
             ]
+
+        # Calculate the rank-filtered maximum displacement to avoid large outliers
+        # by using the k-th largest displacement. Alternatives like the mean or median
+        # would be more sensitive to small changes in the background.
         rank = min(int(self.config["outlier_rank"]), int(valid.sum())) - 1
         return float(np.sort(displacement)[::-1][max(rank, 0)])
 

@@ -15,6 +15,7 @@ Lifecycle:
 
 The pipeline runs until the source is exhausted or ``stop`` is set.
 """
+
 from __future__ import annotations
 
 import logging
@@ -55,9 +56,11 @@ class Pipeline:
     ):
         self.config = config
         self.source = source or instantiate(config["video_source"])
-        self.detectors = detectors if detectors is not None else [
-            instantiate(spec) for spec in config["detectors"]
-        ]
+        self.detectors = (
+            detectors
+            if detectors is not None
+            else [instantiate(spec) for spec in config["detectors"]]
+        )
         self.aggregator = EventAggregator(config["aggregation"])
         self.session_id: Optional[str] = None
 
@@ -77,20 +80,30 @@ class Pipeline:
         """Process the stream until it ends; returns the session ID."""
         fps = self.source.fps
         calibration_end = float(self.config["calibration"]["duration_seconds"])
-        ring: deque = deque(maxlen=int(max(self._lead, CALIBRATION_CLIP_SECONDS) * fps) + 4)
+        ring: deque = deque(
+            maxlen=int(max(self._lead, CALIBRATION_CLIP_SECONDS) * fps) + 4
+        )
 
         db = Database(self.db_path)
         existing = {row["id"] for row in db.list_sessions()}
         self.session_id = generate_session_id(existing=existing)
-        db.create_session(self.session_id, self.config["session_name"],
-                          str(self.config["video_source"].get("config", {}).get("path", "")), fps)
+        db.create_session(
+            self.session_id,
+            self.config["session_name"],
+            str(self.config["video_source"].get("config", {}).get("path", "")),
+            fps,
+        )
         db.close()
 
         worker = self._worker or BackgroundWorker(
             self.db_path, self.media_dir, self.session_id, self.config["media"]
         )
         worker.start()
-        log.info("session %s started (calibrating for %.1fs)", self.session_id, calibration_end)
+        log.info(
+            "session %s started (calibrating for %.1fs)",
+            self.session_id,
+            calibration_end,
+        )
 
         calibrated = False
         last_t = 0.0
@@ -124,7 +137,9 @@ class Pipeline:
         return self.session_id
 
     # --- calibration hand-off ------------------------------------------------
-    def _finish_calibration(self, worker: BackgroundWorker, ring: deque, fps: float) -> None:
+    def _finish_calibration(
+        self, worker: BackgroundWorker, ring: deque, fps: float
+    ) -> None:
         thresholds: Dict[str, dict] = {}
         annotations: dict = {}
         for detector in self.detectors:
@@ -133,17 +148,21 @@ class Pipeline:
             annotations.update(result.annotations)
             for anomaly_id in result.thresholds:
                 self._detector_of[anomaly_id] = detector
-        clip = [(t, img) for t, img in ring][-int(CALIBRATION_CLIP_SECONDS * fps):]
+        clip = [(t, img) for t, img in ring][-int(CALIBRATION_CLIP_SECONDS * fps) :]
         worker.submit_calibration(thresholds, annotations, clip, fps)
         log.info("calibration complete: %d anomalies armed", len(self._detector_of))
 
     # --- monitoring ------------------------------------------------------------
-    def _monitor_frame(self, frame: Frame, ring: deque, worker: BackgroundWorker, fps: float) -> None:
+    def _monitor_frame(
+        self, frame: Frame, ring: deque, worker: BackgroundWorker, fps: float
+    ) -> None:
         readings: Dict[str, Reading] = {}
         for detector in self.detectors:
             calibrated = detector.thresholds()
             for anomaly_id, intensity in detector.process(frame).items():
-                readings[anomaly_id] = Reading(intensity, calibrated[anomaly_id], detector.name)
+                readings[anomaly_id] = Reading(
+                    intensity, calibrated[anomaly_id], detector.name
+                )
 
         opened, closed, discarded = self.aggregator.update(frame.timestamp, readings)
         for anomaly_id in discarded:  # too short to report - free capture state
@@ -161,17 +180,29 @@ class Pipeline:
             self._clips[anomaly_id] = [(t, img) for t, img in ring if t >= lead_start]
 
         for anomaly_id, clip in self._clips.items():
-            if clip and frame.timestamp <= clip[0][0] + self._lead + self._max_clip and clip[-1][0] < frame.timestamp:
+            if (
+                clip
+                and frame.timestamp <= clip[0][0] + self._lead + self._max_clip
+                and clip[-1][0] < frame.timestamp
+            ):
                 clip.append((frame.timestamp, frame.image))
 
         for event in closed:
             self._finalize_event(event, worker, fps)
 
-    def _finalize_event(self, event: AnomalyEvent, worker: BackgroundWorker, fps: float) -> None:
+    def _finalize_event(
+        self, event: AnomalyEvent, worker: BackgroundWorker, fps: float
+    ) -> None:
         metadata, regions = self._enrichment.pop(event.anomaly_id, ({}, []))
         event.metadata = metadata
         event.regions = regions
         clip = self._clips.pop(event.anomaly_id, [])
         worker.submit_event(event, clip, fps)
-        log.info("event %s: %.1fs-%.1fs (%.1fs, peak %.2f)",
-                 event.anomaly_id, event.start, event.end, event.duration, event.max_intensity)
+        log.info(
+            "event %s: %.1fs-%.1fs (%.1fs, peak %.2f)",
+            event.anomaly_id,
+            event.start,
+            event.end,
+            event.duration,
+            event.max_intensity,
+        )

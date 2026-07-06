@@ -1,4 +1,5 @@
 """Standalone HTML report writer with embedded media (no Panel runtime)."""
+
 from __future__ import annotations
 
 import base64
@@ -48,7 +49,9 @@ def _intensity_plot_png(event: dict) -> bytes:
 
     # Threshold line.
     threshold_y = py(event["threshold"])
-    draw.line([(margin, threshold_y), (width - margin, threshold_y)], fill=MUTED, width=1)
+    draw.line(
+        [(margin, threshold_y), (width - margin, threshold_y)], fill=MUTED, width=1
+    )
     draw.text((margin, threshold_y - 14), "threshold", fill=MUTED)
 
     # Intensity polyline.
@@ -56,7 +59,10 @@ def _intensity_plot_png(event: dict) -> bytes:
     if len(points) >= 2:
         draw.line(points, fill=ACCENT, width=2)
     elif points:
-        draw.ellipse([points[0][0] - 2, points[0][1] - 2, points[0][0] + 2, points[0][1] + 2], fill=ACCENT)
+        draw.ellipse(
+            [points[0][0] - 2, points[0][1] - 2, points[0][0] + 2, points[0][1] + 2],
+            fill=ACCENT,
+        )
 
     draw.text((margin, 8), event["anomaly_id"], fill=ACCENT)
     draw.text((margin, height - 28), "session time (s)", fill=(80, 80, 80))
@@ -94,7 +100,9 @@ def write_html_report(
         f"<strong>Started:</strong> {html.escape(format_wall_time(session['started_at']))}<br>",
     ]
     if session.get("finished_at"):
-        parts.append(f"<strong>Finished:</strong> {html.escape(format_wall_time(session['finished_at']))}<br>")
+        parts.append(
+            f"<strong>Finished:</strong> {html.escape(format_wall_time(session['finished_at']))}<br>"
+        )
     parts += [
         f"<strong>Events:</strong> {len(events)}<br>",
         f"<strong>Source:</strong> <code>{html.escape(session.get('source') or '')}</code>",
@@ -123,7 +131,11 @@ def write_html_report(
             parts.append("</table>")
         keypoints = len(calibration["annotations"].get("keypoints", []))
         parts.append(f"<p><strong>Feature points:</strong> {keypoints}</p>")
-        parts.append("<pre>" + html.escape(json.dumps(calibration["thresholds"], indent=2)) + "</pre>")
+        parts.append(
+            "<pre>"
+            + html.escape(json.dumps(calibration["thresholds"], indent=2))
+            + "</pre>"
+        )
 
     parts.append(f"<h2>Events ({len(events)})</h2>")
     for event in events:
@@ -140,10 +152,16 @@ def write_html_report(
             uri = _media_data_uri(event["media"])
             if uri:
                 parts.append(f"<p><img src='{uri}' alt='Event evidence'></p>")
-        plot_uri = "data:image/png;base64," + base64.b64encode(_intensity_plot_png(event)).decode("ascii")
+        plot_uri = "data:image/png;base64," + base64.b64encode(
+            _intensity_plot_png(event)
+        ).decode("ascii")
         parts.append(f"<p><img src='{plot_uri}' alt='Intensity plot'></p>")
         if event.get("metadata"):
-            parts.append("<pre>" + html.escape(json.dumps(event["metadata"], indent=2)) + "</pre>")
+            parts.append(
+                "<pre>"
+                + html.escape(json.dumps(event["metadata"], indent=2))
+                + "</pre>"
+            )
         parts.append("</section>")
 
     parts.append("</body></html>")

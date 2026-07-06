@@ -1,4 +1,5 @@
 """Tests for the report UI construction and the HTML archive export."""
+
 import base64
 from pathlib import Path
 
@@ -61,14 +62,20 @@ class TestReportUi:
         config, session_id, _ = session_data
         view = session_view(config, session_id)
         tabs = view[1]
-        assert [name for name, _ in zip(tabs._names, tabs)] == ["Anomalies", "Calibration", "Export"]
+        assert [name for name, _ in zip(tabs._names, tabs)] == [
+            "Anomalies",
+            "Calibration",
+            "Export",
+        ]
 
     def test_event_filter_and_catalog(self, session_data):
         from amon.report import _filter_events, _event_catalog
 
         config, session_id, db = session_data
         events = db.list_events(session_id)
-        filtered = _filter_events(events, "flicker", [], 0.0, "Start time (earliest first)")
+        filtered = _filter_events(
+            events, "flicker", [], 0.0, "Start time (earliest first)"
+        )
         assert filtered and all("flicker" in e["anomaly_id"] for e in filtered)
 
         catalogue = _event_catalog(events, "", [], 0.0, "Start time (earliest first)")

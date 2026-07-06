@@ -12,6 +12,7 @@ and target patterns contain the same (non-zero) number of wildcards the
 captured values carry over, so ``"hud/*/size": ["hud/*/position"]`` only
 suppresses the position anomaly of the *same* HUD element.
 """
+
 from __future__ import annotations
 
 import re
@@ -21,7 +22,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from amon.model import AnomalyEvent
 
 
-def _compile(pattern: str) -> re.Pattern:
+def _compile_regex(pattern: str) -> re.Pattern:
     parts = [re.escape(p) for p in pattern.split("*")]
     return re.compile("^" + "(.+)".join(parts) + "$")
 
@@ -36,7 +37,10 @@ class SuppressionRules:
     """Evaluates the exclusion hierarchy from the aggregation config."""
 
     def __init__(self, rules: Dict[str, List[str]]):
-        self._rules = [(_compile(sup), sup.count("*"), targets) for sup, targets in (rules or {}).items()]
+        self._rules = [
+            (_compile_regex(sup), sup.count("*"), targets)
+            for sup, targets in (rules or {}).items()
+        ]
 
     def suppressed(self, anomaly_id: str, active: Iterable[str]) -> bool:
         """True if ``anomaly_id`` is suppressed by any *other* active anomaly."""
@@ -52,7 +56,7 @@ class SuppressionRules:
                     if sup_stars and target.count("*") == sup_stars:
                         if _substitute(target, captures) == anomaly_id:
                             return True
-                    elif _compile(target).match(anomaly_id):
+                    elif _compile_regex(target).match(anomaly_id):
                         return True
         return False
 
@@ -87,9 +91,13 @@ class EventAggregator:
         self.linger = float(config.get("suppression_linger_seconds", 2.5))
         self.rules = SuppressionRules(config.get("suppresses", {}))
         self._open: Dict[str, _OpenEvent] = {}
-        self._streaks: Dict[str, Tuple[float, float]] = {}  # aid -> (streak start, last raw)
+        self._streaks: Dict[str, Tuple[float, float]] = (
+            {}
+        )  # aid -> (streak start, last raw)
 
-    def update(self, t: float, readings: Dict[str, Reading]) -> Tuple[List[str], List[AnomalyEvent], List[str]]:
+    def update(
+        self, t: float, readings: Dict[str, Reading]
+    ) -> Tuple[List[str], List[AnomalyEvent], List[str]]:
         """Process one frame's readings.
 
         Returns ``(opened ids, closed events, discarded ids)`` where
@@ -132,7 +140,9 @@ class EventAggregator:
                     self._open[aid] = state
                     opened.append(aid)
                 state.last_above = t
-                state.event.max_intensity = max(state.event.max_intensity, reading.intensity)
+                state.event.max_intensity = max(
+                    state.event.max_intensity, reading.intensity
+                )
                 self._append_point(state, t, reading.intensity)
             elif state is not None:
                 self._append_point(state, t, reading.intensity)

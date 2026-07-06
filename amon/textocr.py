@@ -1,12 +1,13 @@
-"""Tiny offline text recognizer for HUD overlays.
+"""
+Tiny offline text recognizer for HUD overlays.
 
 HUD text is typically rendered in a clean sans-serif font on a plain
-background, so full OCR is unnecessary.  Characters are segmented via
-connected components, normalised to a fixed size and matched against
-glyph templates rendered with OpenCV's Hershey font.  The recognizer
-covers ``A-Z`` and ``0-9`` which suffices for status overlays; extend
-:data:`CHARSET` for richer HUDs.
+background, so full OCR is unnecessary. Characters are segmented via
+connected components, normalized to a fixed size and matched against
+glyph templates rendered with OpenCV's Hershey font. The recognizer
+covers ``A-Z`` and ``0-9`` which suffices for status overlays.
 """
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
@@ -16,34 +17,60 @@ import numpy as np
 
 CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 GLYPH_SIZE = (24, 32)  # (width, height) of normalised glyphs
-
-#: Small HUD glyphs cannot reliably be told apart for these pairs, so they
-#: are canonicalised.  Recognised text stays stable across frames, which is
-#: all the change detection needs.
 CONFUSABLE = str.maketrans({"O": "0", "I": "1"})
 
 
 def _normalise(binary: np.ndarray) -> Tuple[np.ndarray, float]:
-    """Tight-crop a binary glyph; returns (canonical image, aspect ratio)."""
+    """
+    Tight-crop a binary glyph; return the canonical image and aspect ratio.
+
+    Args:
+        binary: Binary image of the glyph.
+
+    Returns:
+        Tuple[np.ndarray, float]: Canonical image and aspect ratio.
+    """
+
     ys, xs = np.nonzero(binary)
-    crop = binary[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    crop = binary[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
     aspect = crop.shape[1] / crop.shape[0]
-    return cv2.resize(crop.astype(np.float32), GLYPH_SIZE, interpolation=cv2.INTER_AREA), aspect
+    return (
+        cv2.resize(crop.astype(np.float32), GLYPH_SIZE, interpolation=cv2.INTER_AREA),
+        aspect,
+    )
 
 
-def _glyph_templates() -> Dict[str, Tuple[np.ndarray, float]]:
+def _create_glyph_templates() -> Dict[str, Tuple[np.ndarray, float]]:
+    """
+
+    Create glyph templates for the charset to be used for matching.
+
+    Returns:
+        Dict[str, Tuple[np.ndarray, float]]: Glyph templates.
+    """
+
     templates = {}
     for char in CHARSET:
         canvas = np.zeros((64, 48), np.uint8)
-        cv2.putText(canvas, char, (4, 52), cv2.FONT_HERSHEY_SIMPLEX, 1.8, 255, 2, cv2.LINE_AA)
+        cv2.putText(
+            canvas,
+            char,
+            (4, 52),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.8,
+            255,
+            2,
+            cv2.LINE_AA,
+        )
         templates[char] = _normalise(canvas > 128)
+
     return templates
 
 
-_TEMPLATES = _glyph_templates()
+_TEMPLATES = _create_glyph_templates()
 
 
-def _match(glyph: np.ndarray, aspect: float) -> str:
+def _match_char(glyph: np.ndarray, aspect: float) -> str:
     """Best charset character by correlation, weighted by aspect similarity.
 
     The aspect-ratio weight disambiguates glyph pairs that look alike once
@@ -54,8 +81,10 @@ def _match(glyph: np.ndarray, aspect: float) -> str:
         correlation = float(cv2.matchTemplate(glyph, tmpl, cv2.TM_CCOEFF_NORMED)[0, 0])
         ratio = min(aspect, tmpl_aspect) / max(aspect, tmpl_aspect)
         score = correlation * ratio
+
         if score > best_score:
             best_char, best_score = char, score
+
     return best_char
 
 
@@ -65,32 +94,53 @@ def read_text(gray: np.ndarray, threshold: Optional[int] = None) -> str:
     Without an explicit ``threshold`` the text/background split is found
     with Otsu's method, which keeps anti-aliased stroke edges intact.
     """
+    # Find the threshold for the text/background split using Otsu's method.
     if threshold is None:
         threshold, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Create a binary image of the text/background split.
     binary = (gray > threshold).astype(np.uint8)
     count, _, stats, _ = cv2.connectedComponentsWithStats(binary)
+
+    # Find the bounding boxes of the text/background split.
     boxes: List[tuple] = []
     for i in range(1, count):
         x, y, w, h, area = stats[i]
         if area >= 6 and h >= 5:
             boxes.append((x, y, w, h))
+
     if not boxes:
         return ""
+
+    # Sort the bounding boxes by the x-coordinate.
     boxes.sort(key=lambda b: b[0])
 
+    # Calculate the median width of the bounding boxes.
     median_width = float(np.median([b[2] for b in boxes]))
+
+    # Iterate over the bounding boxes and extract the text.
     text, prev_right = "", None
     for x, y, w, h in boxes:
         if prev_right is not None and (x - prev_right) > 0.6 * median_width:
             text += " "
-        glyph, aspect = _normalise(binary[y:y + h, x:x + w] > 0)
-        text += _match(glyph, aspect)
+        glyph, aspect = _normalise(binary[y : y + h, x : x + w] > 0)
+        text += _match_char(glyph, aspect)
         prev_right = x + w
+
+    # Account for confusable characters by canonicalizing them.
     return text.translate(CONFUSABLE)
 
 
 def slugify(text: str) -> str:
-    """Lower-case alphanumeric identifier derived from recognised text."""
+    """
+    Lower-case alphanumeric identifier derived from recognised text.
+
+    Args:
+        text: Text to slugify.
+
+    Returns:
+        str: Lower-case alphanumeric identifier.
+    """
     return "".join(ch for ch in text.lower() if ch.isalnum())
 
 
@@ -104,6 +154,8 @@ def levenshtein_norm(a: str, b: str) -> float:
     for i, ca in enumerate(a, 1):
         current = [i]
         for j, cb in enumerate(b, 1):
-            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb)))
+            current.append(
+                min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb))
+            )
         previous = current
     return previous[-1] / max(len(a), len(b))

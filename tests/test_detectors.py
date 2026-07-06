@@ -4,6 +4,7 @@ Each detector is calibrated on the clean first seconds of the synthetic
 scene, then fed frames from a scheduled anomaly window.  Ground truth comes
 from :mod:`amon.synthetic`.
 """
+
 import numpy as np
 import pytest
 
@@ -79,8 +80,8 @@ class TestHudDetector:
         assert "CAM01" in texts
         assert "REC" in texts
         blink_rates = sorted(e.toggle_rate for e in elements.values())
-        assert blink_rates[0] == pytest.approx(0.0, abs=0.3)   # static labels
-        assert blink_rates[-1] == pytest.approx(4.0, abs=0.8)    # 2 Hz REC blinker
+        assert blink_rates[0] == pytest.approx(0.0, abs=0.3)  # static labels
+        assert blink_rates[-1] == pytest.approx(4.0, abs=0.8)  # 2 Hz REC blinker
 
     def test_static_label_text_is_read(self, detector):
         texts = {e.text for e in detector._elements.values()}
@@ -108,23 +109,33 @@ class TestHudDetector:
         return detector
 
     def _label_id(self, detector):
-        return next(e.element_id for e in detector._elements.values() if e.text == "CAM01")
+        return next(
+            e.element_id for e in detector._elements.values() if e.text == "CAM01"
+        )
 
     def _blinker_id(self, detector):
-        return next(e.element_id for e in detector._elements.values() if e.text == "REC")
+        return next(
+            e.element_id for e in detector._elements.values() if e.text == "REC"
+        )
 
     def test_text_change_detected(self, scene):
         detector = self._fresh(scene, 34.0)
         label = self._label_id(detector)
         peaks = peak_intensities(detector, scene, 37.5, 39.5)
         assert peaks[f"hud/{label}/text"] > detector.thresholds()[f"hud/{label}/text"]
-        assert peaks[f"hud/{label}/position"] < detector.thresholds()[f"hud/{label}/position"]
+        assert (
+            peaks[f"hud/{label}/position"]
+            < detector.thresholds()[f"hud/{label}/position"]
+        )
 
     def test_position_change_detected(self, scene):
         detector = self._fresh(scene, 55.0)
         label = self._label_id(detector)
         peaks = peak_intensities(detector, scene, 58.5, 60.5)
-        assert peaks[f"hud/{label}/position"] > detector.thresholds()[f"hud/{label}/position"]
+        assert (
+            peaks[f"hud/{label}/position"]
+            > detector.thresholds()[f"hud/{label}/position"]
+        )
 
     def test_size_change_detected(self, scene):
         detector = self._fresh(scene, 62.0)
@@ -136,13 +147,19 @@ class TestHudDetector:
         detector = self._fresh(scene, 41.0)
         blinker = self._blinker_id(detector)
         peaks = peak_intensities(detector, scene, 44.0, 47.0)
-        assert peaks[f"hud/{blinker}/blink"] > detector.thresholds()[f"hud/{blinker}/blink"]
+        assert (
+            peaks[f"hud/{blinker}/blink"]
+            > detector.thresholds()[f"hud/{blinker}/blink"]
+        )
 
     def test_blink_stop_detected(self, scene):
         detector = self._fresh(scene, 48.0)
         blinker = self._blinker_id(detector)
         peaks = peak_intensities(detector, scene, 51.0, 54.0)
-        assert peaks[f"hud/{blinker}/blink"] > detector.thresholds()[f"hud/{blinker}/blink"]
+        assert (
+            peaks[f"hud/{blinker}/blink"]
+            > detector.thresholds()[f"hud/{blinker}/blink"]
+        )
 
     def test_metadata_and_regions(self, detector):
         label = self._label_id(detector)

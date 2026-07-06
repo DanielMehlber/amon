@@ -1,4 +1,5 @@
 """Video file source based on OpenCV's ``VideoCapture``."""
+
 from __future__ import annotations
 
 import time
@@ -30,9 +31,13 @@ class VideoFileSource(VideoSource):
         self._capture = cv2.VideoCapture(str(path))
         if not self._capture.isOpened():
             raise SourceError(f"cannot open video file: {path}")
-        self._fps = float(self.config.get("fps") or self._capture.get(cv2.CAP_PROP_FPS) or 0)
+        self._fps = float(
+            self.config.get("fps") or self._capture.get(cv2.CAP_PROP_FPS) or 0
+        )
         if self._fps <= 0:
-            raise SourceError(f"cannot determine FPS of {path}; set 'fps' in the config")
+            raise SourceError(
+                f"cannot determine FPS of {path}; set 'fps' in the config"
+            )
         self._realtime = bool(self.config.get("realtime", False))
 
     @property
