@@ -122,12 +122,15 @@ class TestOfflinePanel:
         panel_offline.configure_offline_panel({"offline": True})
 
         from bokeh.settings import settings
-        from panel.theme.material import Material
+        from panel.theme.bootstrap import Bootstrap
 
         assert settings.resources() == "server"
-        assert Material._resources["font"] == {}
+        res = Bootstrap().resolve_resources(cdn=False)
+        for url in list(res["css"].values()) + list(res["js"].values()):
+            assert not url.startswith(("http://", "https://", "//"))
+            assert "jsdelivr" not in url
 
-    def test_served_html_has_no_external_resources(self, session_data, monkeypatch):
+    def test_served_html_has_no_jsdelivr(self, session_data, monkeypatch):
         import threading
         import time
         import urllib.request
@@ -157,3 +160,7 @@ class TestOfflinePanel:
         time.sleep(4)
         html = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
         assert_offline_html(html)
+        assert "jsdelivr" not in html
+        assert "googleapis" not in html
+        assert "cdn.bokeh.org" not in html
+        assert "cdn.holoviz.org" not in html

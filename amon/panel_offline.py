@@ -7,37 +7,32 @@ fail and the UI never initialises.
 
 Call :func:`configure_offline_panel` once before building or serving the
 report.  It forces Bokeh/Panel into **server** resource mode (assets
-served from the local Panel process), strips the Material theme's Google
-Font links, and injects a system-font stylesheet so typography still
-looks acceptable without network access.
+served from the local Panel process), uses the Bootstrap design (fully
+bundled in the Panel wheel), and injects a system-font stylesheet.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List, Optional, Union
 
 _CONFIGURED = False
 
-# Replaces Google Roboto / Material Icons — no separate font files needed.
+_LOCAL_DIST = "static/extensions/panel/"
+
+# System font stack — no Google Fonts or other CDN font requests.
 _OFFLINE_CSS = """
-:root {
-  --mdc-typography-font-family: system-ui, -apple-system, "Segoe UI",
-    Roboto, Helvetica, Arial, sans-serif;
-  --mdc-typography-body1-font-family: var(--mdc-typography-font-family);
-  --mdc-typography-headline6-font-family: var(--mdc-typography-font-family);
-  --mdc-typography-button-font-family: var(--mdc-typography-font-family);
-}
-body, .mdc-typography, .bk-root, .bk-btn {
-  font-family: var(--mdc-typography-font-family);
-}
-.material-icons {
-  font-family: inherit;
-  font-style: normal;
-  letter-spacing: normal;
-  text-transform: none;
+body, .bk-root, .bk-btn, .navbar {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
 }
 """
+
+_EXTERNAL_URL = re.compile(
+    r"(?:https?:)?//(?!(?:127\.0\.0\.1|localhost)\b)[^\s\"'<>]+",
+    re.IGNORECASE,
+)
 
 
 def configure_offline_panel(report_config: Optional[Dict[str, Any]] = None) -> None:
@@ -55,14 +50,10 @@ def configure_offline_panel(report_config: Optional[Dict[str, Any]] = None) -> N
 
         settings.resources.set_value("server")
 
-        # Material design registers Google Font stylesheets by default.
-        from panel.theme.material import Material
-
-        Material._resources["font"] = {}
-
     import panel as pn
 
-    pn.extension(design="material", theme="default")
+    # Bootstrap design ships inside the Panel wheel (no jsDelivr / Google Fonts).
+    pn.extension(design="bootstrap", theme="default")
     if offline:
         pn.config.global_css.append(_OFFLINE_CSS)
 
@@ -77,9 +68,8 @@ def websocket_origins(
     """Return Bokeh ``allow_websocket_origin`` values for *address*/*port*.
 
     Bokeh defaults to ``localhost:<port>`` only.  When the server binds to
-    ``127.0.0.1`` (as our offline config does) the browser Origin header is
-    ``http://127.0.0.1:<port>`` and the WebSocket handshake is rejected
-    unless that host is explicitly allowed.
+    ``127.0.0.1`` the browser Origin header is ``http://127.0.0.1:<port>``
+    and the WebSocket handshake is rejected unless that host is allowed.
     """
     if user_origins is not None:
         if isinstance(user_origins, str):
@@ -87,7 +77,6 @@ def websocket_origins(
         return list(user_origins)
 
     if address in ("0.0.0.0", "::"):
-        # Listening on all interfaces — accept any origin (typical on isolated LANs).
         return ["*"]
 
     if address in ("127.0.0.1", "localhost"):
@@ -98,15 +87,9 @@ def websocket_origins(
 
 def assert_offline_html(html: str) -> None:
     """Raise ``AssertionError`` if *html* references external resources."""
-    import re
-
-    external = [
-        url
-        for url in re.findall(r"https?://[^\"'\s<>]+", html)
-        if not url.startswith(("http://127.0.0.1", "http://localhost"))
-    ]
+    external = sorted(set(_EXTERNAL_URL.findall(html)))
     if external:
         raise AssertionError(
             "Report HTML still references external resources:\n"
-            + "\n".join(f"  - {url}" for url in sorted(set(external)))
+            + "\n".join(f"  - {url}" for url in external)
         )

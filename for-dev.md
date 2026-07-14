@@ -177,5 +177,5 @@ base64-embedded media - a single self-contained file.
 - **Multiprocessing (not threads)** for I/O: GIF encoding is CPU-bound,
   so a separate process protects the real-time loop from the GIL.
 - **Panel** for the UI (project constraint) - declarative, no handwritten
-  HTML, white Material theme.
+  HTML, Bootstrap theme with explicit offline resource configuration.
 - **pip-tools** for reproducible dependency pinning.

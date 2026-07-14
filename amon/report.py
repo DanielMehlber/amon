@@ -13,6 +13,7 @@ All widgets are Panel components; no HTML is written by hand.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import List, Optional
 
@@ -74,6 +75,12 @@ def _filter_events(
     return chosen
 
 
+def _json_block(data) -> pn.pane.Markdown:
+    """Render JSON as a fenced code block (no jsoneditor CDN dependency)."""
+    text = json.dumps(data, indent=2, sort_keys=True, default=str)
+    return pn.pane.Markdown(f"```json\n{text}\n```")
+
+
 def _event_summary(event: dict) -> str:
     """One-line label for a collapsed catalogue card."""
     return (
@@ -114,7 +121,7 @@ def event_detail(event: dict) -> pn.Column:
     parts = [header, pn.pane.Bokeh(intensity_figure(event, width=680))]
     if event["metadata"]:
         parts.append(pn.pane.Markdown("**Detector metadata**"))
-        parts.append(pn.pane.JSON(event["metadata"], depth=2))
+        parts.append(_json_block(event["metadata"]))
     if event["regions"]:
         parts.append(pn.pane.Markdown(f"**Highlighted regions:** `{event['regions']}`"))
     return pn.Column(*parts, sizing_mode="stretch_width", margin=(8, 0))
@@ -268,7 +275,7 @@ def calibration_tab(calibration: dict) -> pn.Column:
     )
 
     parts.append(pn.pane.Markdown("#### Calibrated thresholds"))
-    parts.append(pn.pane.JSON(calibration["thresholds"], depth=3))
+    parts.append(_json_block(calibration["thresholds"]))
     return pn.Column(*parts, sizing_mode="stretch_width")
 
 
@@ -341,7 +348,7 @@ def build_app(config: dict):
     finally:
         db.close()
 
-    template = pn.template.MaterialTemplate(
+    template = pn.template.BootstrapTemplate(
         title=REPORT_TITLE,
         theme="default",
         header_background=ACCENT_DARK,
