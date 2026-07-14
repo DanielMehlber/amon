@@ -57,6 +57,10 @@ DEFAULTS: dict = {
     },
     "report": {
         "port": 5006,
+        # Serve Panel/Bokeh assets locally — required for air-gapped use.
+        "offline": True,
+        # Bind address for the report server (use "0.0.0.0" on isolated LANs).
+        "address": "127.0.0.1",
     },
     "export": {
         "format": "html",

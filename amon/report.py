@@ -19,10 +19,9 @@ from typing import List, Optional
 import panel as pn
 
 from amon.db import Database
+from amon.panel_offline import configure_offline_panel, websocket_origins
 from amon.plots import intensity_figure
 from amon.timefmt import format_wall_time
-
-pn.extension(design="material", theme="default")
 
 # Report chrome — red accent throughout the UI and plots.
 ACCENT = "#c62828"
@@ -335,6 +334,7 @@ def session_view(config: dict, session_id: str) -> pn.Column:
 
 def build_app(config: dict):
     """Assemble the report application (a Panel template)."""
+    configure_offline_panel(config.get("report"))
     db = Database(Path(config["data_dir"]) / "amon.sqlite")
     try:
         sessions = db.list_sessions()
@@ -377,5 +377,16 @@ def build_app(config: dict):
 
 def serve(config: dict) -> None:
     """Launch the report UI in the browser (blocks until stopped)."""
-    port = int(config["report"]["port"])
-    pn.serve(lambda: build_app(config), port=port, show=True)
+    report = config["report"]
+    configure_offline_panel(report)
+    port = int(report["port"])
+    address = report.get("address", "127.0.0.1")
+    pn.serve(
+        lambda: build_app(config),
+        port=port,
+        address=address,
+        show=True,
+        websocket_origin=websocket_origins(
+            address, port, report.get("websocket_origin")
+        ),
+    )

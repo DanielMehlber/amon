@@ -68,7 +68,11 @@ python -m amon report config.yaml
 ```
 
 opens the report UI in your browser (port from `report.port`, default
-5006). You can:
+5006).  The UI serves all JavaScript, CSS and fonts from the local Panel
+process (`report.offline: true` by default) so it works without internet
+access.  Set `report.address` to `0.0.0.0` when opening the UI from another
+machine on an isolated network (WebSocket origins are configured
+automatically).  You can:
 
 - pick any completed or still-running session,
 - browse events chronologically and filter by anomaly type or duration,

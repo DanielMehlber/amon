@@ -25,8 +25,8 @@ Report UI (Panel, report.py) ◀── reads ── SQLite + media files ── 
 - `amon/worker.py` - a `multiprocessing.Process` receiving jobs through a
   queue; the pipeline never blocks on I/O (non-functional requirement).
 - `amon/db.py` - SQLite persistence (sessions, calibrations, events).
-- `amon/report.py`, `amon/exporters.py`, `amon/plots.py` - Panel UI and
-  standalone HTML export.
+- `amon/report.py`, `amon/panel_offline.py`, `amon/exporters.py`, `amon/plots.py` -
+  Panel UI (with explicit offline resource configuration), standalone HTML export.
 
 ## Detector interface (`amon/detectors/__init__.py`)
 

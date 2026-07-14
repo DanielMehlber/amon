@@ -96,3 +96,64 @@ class TestReportUi:
         config = merge_defaults({"data_dir": str(tmp_path)})
         template = build_app(config)
         assert template is not None
+
+
+class TestOfflinePanel:
+    def test_websocket_origins_for_loopback(self):
+        from amon.panel_offline import websocket_origins
+
+        assert set(websocket_origins("127.0.0.1", 5006)) == {
+            "localhost:5006",
+            "127.0.0.1:5006",
+        }
+        assert set(websocket_origins("localhost", 5006)) == {
+            "localhost:5006",
+            "127.0.0.1:5006",
+        }
+        assert websocket_origins("127.0.0.1", 5006, ["host:1234"]) == ["host:1234"]
+        assert websocket_origins("0.0.0.0", 5006) == ["*"]
+
+    def test_offline_config_forces_local_resources(self, monkeypatch):
+        monkeypatch.setenv("BOKEH_RESOURCES", "cdn")
+
+        import amon.panel_offline as panel_offline
+
+        panel_offline._CONFIGURED = False
+        panel_offline.configure_offline_panel({"offline": True})
+
+        from bokeh.settings import settings
+        from panel.theme.material import Material
+
+        assert settings.resources() == "server"
+        assert Material._resources["font"] == {}
+
+    def test_served_html_has_no_external_resources(self, session_data, monkeypatch):
+        import threading
+        import time
+        import urllib.request
+
+        import panel as pn
+
+        from amon.panel_offline import assert_offline_html, websocket_origins
+        from amon.report import build_app
+
+        monkeypatch.setenv("BOKEH_RESOURCES", "cdn")
+        config, _, _ = session_data
+        port = 5094
+        address = config["report"].get("address", "127.0.0.1")
+        threading.Thread(
+            target=lambda: pn.serve(
+                lambda: build_app(config),
+                port=port,
+                show=False,
+                threaded=True,
+                address=address,
+                websocket_origin=websocket_origins(
+                    address, port, config["report"].get("websocket_origin")
+                ),
+            ),
+            daemon=True,
+        ).start()
+        time.sleep(4)
+        html = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
+        assert_offline_html(html)
