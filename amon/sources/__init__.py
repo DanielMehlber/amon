@@ -41,3 +41,13 @@ class VideoSource(ABC):
 
     def __exit__(self, *exc) -> None:
         self.close()
+
+
+def source_label(spec: dict) -> str:
+    """Human-readable source identifier stored on the session row."""
+    cfg = spec.get("config") or {}
+    if "path" in cfg:
+        return str(cfg["path"])
+    if "device" in cfg:
+        return str(cfg["device"])
+    return str(spec.get("class", ""))

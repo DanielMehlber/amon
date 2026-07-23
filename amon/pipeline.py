@@ -31,7 +31,7 @@ from amon.detectors import Detector
 from amon.model import AnomalyEvent, Frame
 from amon.names import generate_session_id
 from amon.plugins import instantiate
-from amon.sources import VideoSource
+from amon.sources import VideoSource, source_label
 from amon.worker import BackgroundWorker
 
 log = logging.getLogger("amon.pipeline")
@@ -90,7 +90,7 @@ class Pipeline:
         db.create_session(
             self.session_id,
             self.config["session_name"],
-            str(self.config["video_source"].get("config", {}).get("path", "")),
+            source_label(self.config["video_source"]),
             fps,
         )
         db.close()

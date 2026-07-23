@@ -63,9 +63,16 @@ detectors:
 ## Video source interface (`amon/sources/__init__.py`)
 
 Implement `fps` and `frames()` (a generator of `Frame` objects), raise
-`SourceError` when the stream cannot be opened. `VideoFileSource` is the
-bundled reference implementation; a camera/RTSP source would follow the
-same pattern and be referenced from the config.
+`SourceError` when the stream cannot be opened. Bundled implementations:
+
+- `VideoFileSource` — pre-recorded files (`amon/sources/file.py`)
+- `HdmiCaptureSource` — live HDMI / capture-card devices
+  (`amon/sources/hdmi.py`).  Native resolution and FPS are auto-detected;
+  `processing_*` config keys optionally downscale and throttle output.
+  When the configured device is unavailable, open alternatives are listed
+  in the error before the pipeline aborts.
+
+Reference a plugin from the config by dotted class path; no core changes needed.
 
 ## Image-processing algorithms
 

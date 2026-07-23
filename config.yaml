@@ -10,6 +10,16 @@ video_source:
     path: test-video.avi   # change this to your video
     realtime: false        # true paces playback like a live stream
 
+# Live HDMI / capture-card example (uncomment and adjust device):
+# video_source:
+#   class: amon.sources.hdmi.HdmiCaptureSource
+#   config:
+#     device: 0              # or /dev/video0 on Linux
+#     capture_fourcc: MJPG  # optional; depends on the capture card
+#     processing_width: 640   # optional downscale (native size auto-detected)
+#     processing_height: 480
+#     processing_fps: 10       # optional cap; native rate auto-detected
+
 calibration:
   duration_seconds: 10.0
 
