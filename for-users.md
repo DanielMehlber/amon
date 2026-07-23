@@ -37,8 +37,12 @@ fully commented example. The most important keys:
 
 | Key | Meaning |
 |---|---|
-| `video_source.config.path` | The video file to monitor. |
-| `video_source.config.realtime` | `true` paces playback like a live stream. |
+| `video_source.config.path` | The video file to monitor (file source). |
+| `video_source.config.device` | Capture device index or path (HDMI source). |
+| `video_source.config.processing_fps` | Max FPS delivered to the pipeline (HDMI). |
+| `video_source.config.processing_width` | Downscale width for the pipeline (HDMI). |
+| `video_source.config.processing_height` | Downscale height for the pipeline (HDMI). |
+| `video_source.config.realtime` | `true` paces playback like a live stream (file source). |
 | `calibration.duration_seconds` | Length of the automatic calibration phase. |
 | `detectors` | Which detector plugins to load and their settings. |
 | `aggregation.suppresses` | The exclusion hierarchy that prevents false positives. |
@@ -47,6 +51,16 @@ fully commented example. The most important keys:
 
 Detector thresholds are **not** configured - they are learned automatically
 during calibration.
+
+### Live HDMI input
+
+To monitor a capture card instead of a file, point `video_source` at
+`amon.sources.hdmi.HdmiCaptureSource` and set `device` to the OS index or
+path (e.g. `0` or `/dev/video0`).  Native resolution and frame rate are
+detected automatically; optional `processing_width`, `processing_height`
+and `processing_fps` downscale and throttle the stream so the pipeline is
+not overwhelmed.  If the device cannot be opened, available alternatives
+are listed in the error message.  See the commented example in `config.yaml`.
 
 ## Running a monitoring session
 
@@ -83,13 +97,17 @@ automatically).  You can:
 
 ## Exporting reports
 
-Either click **Export report** in the UI's Export tab, or run:
+Either click **Export events as CSV** on the Anomalies tab, choose **csv** or
+**html** in the Export tab, or run:
 
 ```bash
-python -m amon export config.yaml --session <session-id>
+python -m amon export config.yaml --session <session-id> --format csv
+python -m amon export config.yaml --session <session-id> --format html
 ```
 
-This writes a standalone HTML archive (media embedded, works offline) to
+HTML archives embed media and work fully offline.  CSV files contain one
+row per anomaly with session-relative and wall-clock timestamps, suitable
+for spreadsheets and statistical analysis.  Exports are written to
 `<data_dir>/exports/`. Use `--output` to choose a different location. The
 export format defaults to `export.format` in the config; additional
 formats can be added by developers (see `for-dev.md`).

@@ -178,8 +178,10 @@ def _event_catalog(
     )
 
 
-def events_tab(events: list) -> pn.Column:
+def events_tab(config: dict, session_id: str, events: list) -> pn.Column:
     """Filterable, scrollable catalogue of collapsible anomaly cards."""
+    from amon.exporters import export_session
+
     types = sorted({e["anomaly_id"] for e in events})
     max_duration = max([e["duration"] for e in events] + [1.0])
 
@@ -213,8 +215,24 @@ def events_tab(events: list) -> pn.Column:
         sizing_mode="stretch_width",
     )
 
+    export_button = pn.widgets.Button(
+        name="Export events as CSV", button_type="primary", width=200
+    )
+    export_status = pn.pane.Markdown("")
+
+    def run_csv_export(_):
+        try:
+            path = export_session(config, session_id, "csv")
+            export_status.object = f"Exported **{len(events)}** events to `{path}`"
+        except Exception as exc:
+            export_status.object = f"**Export failed:** {exc}"
+
+    export_button.on_click(run_csv_export)
+    export_row = pn.Row(export_button, export_status, sizing_mode="stretch_width")
+
     return pn.Column(
         filters,
+        export_row,
         pn.bind(_event_catalog, events, search, type_filter, min_duration, sort_by),
         sizing_mode="stretch_width",
     )
@@ -326,7 +344,7 @@ def session_view(config: dict, session_id: str) -> pn.Column:
         (
             "Anomalies",
             (
-                events_tab(events)
+                events_tab(config, session_id, events)
                 if events
                 else pn.pane.Markdown("*No anomalies recorded.*")
             ),

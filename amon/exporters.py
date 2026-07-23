@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Optional, Type
 
+from amon.csv_export import write_events_csv
 from amon.db import Database
 from amon.html_export import write_html_report
 
@@ -46,8 +47,21 @@ class HtmlArchiveExporter(Exporter):
         return write_html_report(session, events, calibration, out_path)
 
 
+class CsvEventsExporter(Exporter):
+    """Tabular export of anomaly events (one row per occurrence)."""
+
+    format = "csv"
+    suffix = ".csv"
+
+    def export(
+        self, session: dict, events: list, calibration: Optional[dict], out_path: Path
+    ) -> Path:
+        return write_events_csv(session, events, out_path)
+
+
 EXPORTERS: Dict[str, Type[Exporter]] = {
     HtmlArchiveExporter.format: HtmlArchiveExporter,
+    CsvEventsExporter.format: CsvEventsExporter,
 }
 
 

@@ -1,6 +1,6 @@
 """Tests for the report UI construction and the HTML archive export."""
 
-import base64
+import csv
 from pathlib import Path
 
 import pytest
@@ -46,6 +46,24 @@ class TestHtmlExport:
 
     def test_registry_is_extensible(self):
         assert "html" in EXPORTERS
+        assert "csv" in EXPORTERS
+
+
+class TestCsvExport:
+    def test_export_produces_analyzable_table(self, session_data, tmp_path):
+        config, session_id, db = session_data
+        out = export_session(config, session_id, "csv", str(tmp_path / "events.csv"))
+        rows = list(csv.DictReader(Path(out).read_text(encoding="utf-8").splitlines()))
+        events = db.list_events(session_id)
+
+        assert len(rows) == len(events)
+        assert rows[0]["anomaly_id"] == events[0]["anomaly_id"]
+        assert rows[0]["start_s"]
+        assert rows[0]["start_time"]
+        assert float(rows[0]["duration_s"]) == pytest.approx(events[0]["duration"], abs=0.001)
+
+    def test_csv_available_from_export_tab_formats(self):
+        assert "csv" in EXPORTERS
 
 
 class TestReportUi:
