@@ -22,8 +22,8 @@ DURATION = 86.0
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
-#: Infrared landscape photograph in the repository root.
-BACKGROUND_IMAGE = Path(__file__).resolve().parent.parent / "infrared-landscape.png"
+#: Infrared landscape photograph shipped next to this module (package data).
+BACKGROUND_IMAGE = Path(__file__).resolve().with_name("infrared-landscape.png")
 
 # Baseline sensor character (always present; calibration learns these levels).
 BASELINE_NOISE_SIGMA = 4.0

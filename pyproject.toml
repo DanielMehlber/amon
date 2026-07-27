@@ -18,3 +18,6 @@ amon = "amon.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["amon*"]
+
+[tool.setuptools.package-data]
+amon = ["*.png"]
