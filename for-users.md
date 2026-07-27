@@ -39,7 +39,8 @@ run (later runs reuse the cache) and writes `dist/amon-portable-<platform>/`.
 Copy that folder to a USB stick. On the offline PC:
 
 ```bat
-amon.bat monitor config.yaml
+amon.bat synth test-video.avi
+amon.bat monitor test.yaml
 ```
 
 ## Quick start
@@ -48,14 +49,28 @@ Generate the synthetic demo video and monitor it:
 
 ```bash
 python -m amon synth test-video.avi
-python -m amon monitor config.yaml
-python -m amon report config.yaml     # opens the browser UI
+python -m amon monitor test.yaml
+python -m amon report test.yaml     # opens the browser UI
+```
+
+For live HDMI / capture-card input use `hdmi.yaml` instead (adjust `device`):
+
+```bash
+python -m amon monitor hdmi.yaml
+python -m amon report hdmi.yaml
 ```
 
 ## Configuration
 
-All behaviour is controlled by a single YAML file; see `config.yaml` for a
-fully commented example. The most important keys:
+Two ready-made configs ship with the project:
+
+| File | Purpose |
+|---|---|
+| `test.yaml` | File source — synthetic / recorded `test-video.avi` |
+| `hdmi.yaml` | Live HDMI / capture-card input |
+
+All behaviour is controlled by the YAML file you pass to the CLI. The most
+important keys:
 
 | Key | Meaning |
 |---|---|
@@ -76,18 +91,18 @@ during calibration.
 
 ### Live HDMI input
 
-To monitor a capture card instead of a file, point `video_source` at
-`amon.sources.hdmi.HdmiCaptureSource` and set `device` to the OS index or
-path (e.g. `0` or `/dev/video0`).  Native resolution and frame rate are
-detected automatically; optional `processing_width`, `processing_height`
-and `processing_fps` downscale and throttle the stream so the pipeline is
-not overwhelmed.  If the device cannot be opened, available alternatives
-are listed in the error message.  See the commented example in `config.yaml`.
+Use `hdmi.yaml` and set `device` to the OS index or path (e.g. `0` or
+`/dev/video0`).  Native resolution and frame rate are detected automatically;
+optional `processing_width`, `processing_height` and `processing_fps`
+downscale and throttle the stream so the pipeline is not overwhelmed.  If the
+device cannot be opened, available alternatives are listed in the error
+message.
 
 ## Running a monitoring session
 
 ```bash
-python -m amon monitor config.yaml
+python -m amon monitor test.yaml    # file demo
+python -m amon monitor hdmi.yaml    # live capture
 ```
 
 The session starts with the calibration phase (the video should show
@@ -100,7 +115,7 @@ in the background while monitoring continues in real time.
 ## Viewing reports
 
 ```bash
-python -m amon report config.yaml
+python -m amon report test.yaml     # or hdmi.yaml
 ```
 
 opens the report UI in your browser (port from `report.port`, default
@@ -123,8 +138,8 @@ Either click **Export events as CSV** on the Anomalies tab, choose **csv** or
 **html** in the Export tab, or run:
 
 ```bash
-python -m amon export config.yaml --session <session-id> --format csv
-python -m amon export config.yaml --session <session-id> --format html
+python -m amon export test.yaml --session <session-id> --format csv
+python -m amon export test.yaml --session <session-id> --format html
 ```
 
 HTML archives embed media and work fully offline.  CSV files contain one

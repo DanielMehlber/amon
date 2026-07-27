@@ -1,5 +1,9 @@
-# Deprecated: use test.yaml (file / synthetic) or hdmi.yaml (live capture).
-# Kept as an alias of test.yaml so older docs and scripts keep working.
+# AMON test configuration — synthetic / file-based demo.
+#
+# Generate the clip first, then monitor it:
+#   python -m amon synth test-video.avi
+#   python -m amon monitor test.yaml
+#   python -m amon report test.yaml
 
 session_name: test
 data_dir: data
@@ -8,7 +12,7 @@ video_source:
   class: amon.sources.file.VideoFileSource
   config:
     path: test-video.avi
-    realtime: false
+    realtime: false        # true paces playback like a live stream
 
 calibration:
   duration_seconds: 10.0
@@ -24,6 +28,7 @@ detectors:
 aggregation:
   cooldown_seconds: 1.0
   min_duration_seconds: 0.5
+  # Exclusion hierarchy: primary anomalies suppress their side-effects.
   suppresses:
     temporal/flicker: ["*"]
     temporal/noise: ["temporal/contrast", "hud/*", "spatial/*"]

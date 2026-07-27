@@ -1,0 +1,55 @@
+# AMON live HDMI / capture-card configuration.
+#
+# Adjust ``device`` to the OS index or path (e.g. 0 or /dev/video0).
+# Native resolution and FPS are auto-detected; optional processing_* keys
+# downscale and throttle the stream for the pipeline.
+#
+#   python -m amon monitor hdmi.yaml
+#   python -m amon report hdmi.yaml
+
+session_name: hdmi
+data_dir: data
+
+video_source:
+  class: amon.sources.hdmi.HdmiCaptureSource
+  config:
+    device: 0                # or /dev/video0 on Linux
+    # capture_fourcc: MJPG   # optional; depends on the capture card
+    processing_width: 640    # optional downscale (native size auto-detected)
+    processing_height: 480
+    processing_fps: 10       # optional cap; native rate auto-detected
+
+calibration:
+  duration_seconds: 10.0
+
+detectors:
+  - class: amon.detectors.temporal.TemporalDetector
+    config: {}
+  - class: amon.detectors.hud.HudDetector
+    config: {}
+  - class: amon.detectors.spatial.SpatialDetector
+    config: {}
+
+aggregation:
+  cooldown_seconds: 1.0
+  min_duration_seconds: 0.5
+  # Exclusion hierarchy: primary anomalies suppress their side-effects.
+  suppresses:
+    temporal/flicker: ["*"]
+    temporal/noise: ["temporal/contrast", "hud/*", "spatial/*"]
+    temporal/contrast: ["hud/*", "spatial/*"]
+    hud/*/size: ["hud/*/text", "hud/*/position"]
+    hud/*/position: ["hud/*/text"]
+
+media:
+  max_clip_seconds: 6.0
+  lead_seconds: 1.0
+  gif_max_fps: 10.0
+
+report:
+  port: 5006
+  offline: true
+  address: 127.0.0.1       # use 0.0.0.0 to reach the UI from other hosts
+
+export:
+  format: html

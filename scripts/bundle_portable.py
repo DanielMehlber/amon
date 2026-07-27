@@ -16,8 +16,9 @@ Output: ``dist/amon-portable-<platform>/`` with ``amon`` / ``amon.bat``.
 
 On the offline machine::
 
-    amon.bat monitor config.yaml    # Windows
-    ./amon monitor config.yaml      # Unix
+    amon.bat synth test-video.avi
+    amon.bat monitor test.yaml      # file demo
+    amon.bat monitor hdmi.yaml      # live capture
 """
 
 from __future__ import annotations
@@ -347,7 +348,14 @@ def copy_app_sources(bundle: Path, lockfile: Path) -> None:
         dest,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
     )
-    for name in ("config.yaml", "for-users.md", "README.md", "pyproject.toml"):
+    for name in (
+        "config.yaml",
+        "test.yaml",
+        "hdmi.yaml",
+        "for-users.md",
+        "README.md",
+        "pyproject.toml",
+    ):
         shutil.copy2(ROOT / name, bundle / name)
     shutil.copy2(lockfile, bundle / "requirements-runtime.txt")
 

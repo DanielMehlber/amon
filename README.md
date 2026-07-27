@@ -22,8 +22,9 @@ pip-compile --strip-extras -o requirements.txt requirements.in
 pip-sync requirements.txt
 
 python -m amon synth test-video.avi      # synthetic demo video
-python -m amon monitor config.yaml       # run a monitoring session
-python -m amon report config.yaml        # inspect results in the browser
+python -m amon monitor test.yaml         # file-based test session
+python -m amon report test.yaml          # inspect results in the browser
+# Live capture: python -m amon monitor hdmi.yaml
 ```
 
 ### Offline USB bundle
@@ -35,7 +36,8 @@ python scripts/bundle_portable.py    # builds dist/amon-portable-<platform>/
 On the offline target:
 
 ```bat
-amon.bat monitor config.yaml
+amon.bat monitor test.yaml
+# or: amon.bat monitor hdmi.yaml
 ```
 
 ## Tests
