@@ -184,12 +184,19 @@ python3 scripts/bundle_portable.py
 Build OS must equal target OS. The script automatically:
 
 1. Fetches a relocatable CPython into `dist/cache/` (skipped if already cached).
+   This is **not** the host Python: system installs use fixed paths and cannot
+   be copied to USB; PBS builds are self-contained (~30–50 MB compressed).
 2. Compiles `requirements-runtime.in` → `dist/cache/requirements-runtime.txt`
    when the input is newer than the lockfile.
 3. Downloads wheels into `dist/cache/wheels/` only when the lockfile digest
    changes (no double-download on re-runs).
 4. Assembles `dist/amon-portable-<platform>/` with `amon` / `amon.bat`
    launchers (`python -m amon`, no venv activate).
+
+If CPython cannot be downloaded (offline build machine, firewall, 403), place
+the matching `cpython-*-<triple>-install_only.tar.gz` from
+[python-build-standalone](https://github.com/astral-sh/python-build-standalone/releases)
+into `dist/cache/` manually; the script prints the exact pattern on failure.
 
 ## Technical decisions
 

@@ -5,8 +5,13 @@ Run on the same OS/arch as the offline target::
 
     python scripts/bundle_portable.py
 
-The script fetches CPython and dependency wheels only when they are not
-already present under ``dist/cache/`` (so re-runs do not download twice).
+The script bundles a **relocatable** CPython (python-build-standalone), not the
+host interpreter.  System Python is tied to fixed install paths and often
+cannot be copied to a USB stick; PBS builds are self-contained and run on
+machines with no Python installed.  Host Python is only used to execute this
+script.
+
+CPython and wheels are fetched only when missing under ``dist/cache/``.
 Output: ``dist/amon-portable-<platform>/`` with ``amon`` / ``amon.bat``.
 
 On the offline machine::
@@ -24,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Optional, Sequence
@@ -74,6 +80,45 @@ def log(msg: str) -> None:
 
 def die(msg: str) -> None:
     print(f"error: {msg}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def cpython_cache_dir() -> Path:
+    CACHE.mkdir(parents=True, exist_ok=True)
+    return CACHE
+
+
+def cpython_glob_hint() -> str:
+    """Filename pattern the user should match when downloading manually."""
+    return f"cpython-{PYTHON_SERIES}.*-{host_triple()}-install_only.tar.gz"
+
+
+def cpython_manual_help(reason: str) -> str:
+    """Actionable offline instructions when an automatic CPython fetch fails."""
+    cache = cpython_cache_dir()
+    pattern = cpython_glob_hint()
+    release = f"https://github.com/astral-sh/python-build-standalone/releases/tag/{PBS_TAG}"
+    return f"""\
+{reason}
+
+Network access is required once to fetch CPython, unless you place the
+archive in the cache yourself:
+
+  1. On a machine with internet, open:
+       {release}
+  2. Download the asset matching:
+       {pattern}
+     (pick the plain ``install_only`` build, not ``stripped`` or ``freethreaded``)
+  3. Copy the ``.tar.gz`` file into:
+       {cache}
+  4. Re-run:
+       python scripts/bundle_portable.py
+"""
+
+
+def die_network(resource: str, err: BaseException, *, manual_help: str) -> None:
+    print(f"error: could not download {resource}: {err}", file=sys.stderr)
+    print(manual_help, file=sys.stderr)
     raise SystemExit(1)
 
 
@@ -144,9 +189,16 @@ def download_cpython() -> Path:
         f"/releases/tags/{PBS_TAG}"
     )
     log(f"Resolving CPython {PYTHON_SERIES} ({triple})")
+    manual = cpython_manual_help("Automatic CPython download failed.")
+
     req = urllib.request.Request(api, headers={"User-Agent": "amon-bundle-portable"})
-    with urllib.request.urlopen(req) as resp:
-        release = json.load(resp)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            release = json.load(resp)
+    except urllib.error.HTTPError as err:
+        die_network(f"CPython release metadata (HTTP {err.code})", err, manual_help=manual)
+    except urllib.error.URLError as err:
+        die_network("CPython release metadata", err.reason, manual_help=manual)
 
     suffix = "-install_only.tar.gz"
     series = f"{PYTHON_SERIES}."
@@ -161,7 +213,10 @@ def download_cpython() -> Path:
         and "install_only_stripped" not in a["name"]
     ]
     if not names:
-        die(f"no PBS asset for {PYTHON_SERIES} / {triple} in tag {PBS_TAG}")
+        die(
+            f"no PBS asset for {PYTHON_SERIES} / {triple} in tag {PBS_TAG}\n\n"
+            + manual
+        )
     asset = sorted(names)[-1]
     url = (
         "https://github.com/astral-sh/python-build-standalone/releases/download"
@@ -170,7 +225,16 @@ def download_cpython() -> Path:
     dest = CACHE / asset
     log(f"Downloading {asset}")
     partial = dest.with_suffix(dest.suffix + ".partial")
-    urllib.request.urlretrieve(url, partial)
+    try:
+        urllib.request.urlretrieve(url, partial)
+    except urllib.error.HTTPError as err:
+        if partial.exists():
+            partial.unlink()
+        die_network(f"CPython archive {asset} (HTTP {err.code})", err, manual_help=manual)
+    except urllib.error.URLError as err:
+        if partial.exists():
+            partial.unlink()
+        die_network(f"CPython archive {asset}", err.reason, manual_help=manual)
     partial.replace(dest)
     return dest
 
