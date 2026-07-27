@@ -1,4 +1,7 @@
-# Runtime dependencies (compile with: pip-compile requirements.in)
+# Full developer dependency set. Compile locally (do not commit the lockfile):
+#   pip-compile --strip-extras -o requirements.txt requirements.in
+#   pip-sync requirements.txt
+# Portable / offline installs use requirements-runtime.in instead.
 opencv-python-headless
 numpy
 pyyaml

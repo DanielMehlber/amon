@@ -175,6 +175,22 @@ base64-embedded media - a single self-contained file.
   verifies events, timing, suppression, database contents and media.
 - Run everything with `python -m pytest`.
 
+## Portable offline distribution
+
+```bash
+python3 scripts/bundle_portable.py
+```
+
+Build OS must equal target OS. The script automatically:
+
+1. Fetches a relocatable CPython into `dist/cache/` (skipped if already cached).
+2. Compiles `requirements-runtime.in` → `dist/cache/requirements-runtime.txt`
+   when the input is newer than the lockfile.
+3. Downloads wheels into `dist/cache/wheels/` only when the lockfile digest
+   changes (no double-download on re-runs).
+4. Assembles `dist/amon-portable-<platform>/` with `amon` / `amon.bat`
+   launchers (`python -m amon`, no venv activate).
+
 ## Technical decisions
 
 - **OpenCV + classical CV** instead of learned models: deterministic,
@@ -186,3 +202,5 @@ base64-embedded media - a single self-contained file.
 - **Panel** for the UI (project constraint) - declarative, no handwritten
   HTML, Bootstrap theme with explicit offline resource configuration.
 - **pip-tools** for reproducible dependency pinning.
+- **Portable CPython + wheelhouse** for USB/offline distribution instead of
+  a frozen single-file binary (friendlier to OpenCV/Panel and field debug).

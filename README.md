@@ -17,11 +17,25 @@ export. Runs fully offline.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install pip-tools && pip-sync requirements.txt
+pip install pip-tools
+pip-compile --strip-extras -o requirements.txt requirements.in
+pip-sync requirements.txt
 
 python -m amon synth test-video.avi      # synthetic demo video
 python -m amon monitor config.yaml       # run a monitoring session
 python -m amon report config.yaml        # inspect results in the browser
+```
+
+### Offline USB bundle
+
+```bash
+python scripts/bundle_portable.py    # builds dist/amon-portable-<platform>/
+```
+
+On the offline target:
+
+```bat
+amon.bat monitor config.yaml
 ```
 
 ## Tests

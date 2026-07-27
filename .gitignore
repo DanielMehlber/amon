@@ -6,3 +6,10 @@ data/
 *.avi
 *.mp4
 .DS_Store
+dist/
+*.egg-info/
+build/
+
+# Lockfiles are machine/Python-specific — compile locally with pip-compile.
+requirements.txt
+requirements-runtime.txt

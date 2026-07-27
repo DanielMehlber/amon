@@ -9,16 +9,38 @@ archive.  Everything runs fully offline.
 
 ## Installation
 
-Requires Python 3.9+. Dependencies are managed with pip-tools:
+### Developer / connected machine
+
+Requires Python 3.9+. Dependencies are managed with pip-tools. Lockfiles are
+**not** committed — compile them on your machine:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install pip-tools
-pip-sync requirements.txt        # installs the pinned dependency set
+pip-compile --strip-extras -o requirements.txt requirements.in
+pip-sync requirements.txt
 ```
 
-(To change dependencies, edit `requirements.in` and run `pip-compile`.)
+(Runtime-only inputs for portable builds live in `requirements-runtime.in`;
+`scripts/bundle_portable.py` compiles and caches the lockfile automatically.)
+
+### Offline / USB portable bundle
+
+On a machine with network (same OS/arch as the offline target):
+
+```bash
+python scripts/bundle_portable.py          # Windows: python scripts\bundle_portable.py
+```
+
+This downloads CPython and runtime wheels into `dist/cache/` on the first
+run (later runs reuse the cache) and writes `dist/amon-portable-<platform>/`.
+
+Copy that folder to a USB stick. On the offline PC:
+
+```bat
+amon.bat monitor config.yaml
+```
 
 ## Quick start
 
