@@ -1,0 +1,9 @@
+# Runtime dependencies for portable / offline installs (no pytest).
+# Compile into your cache directory before bundling (do not commit the lockfile):
+#   pip-compile --strip-extras -o requirements-runtime.txt requirements-runtime.in
+opencv-python-headless
+numpy
+pyyaml
+pillow
+panel
+pandas

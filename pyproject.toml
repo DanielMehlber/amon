@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amon"
+version = "1.0.0"
+description = "Video anomaly monitoring framework for static scenes"
+readme = "README.md"
+requires-python = ">=3.9"
+# Dependencies come from requirements.in / requirements-runtime.in
+# (compile locally with pip-compile; lockfiles are not committed).
+# Install deps separately, then: pip install --no-deps .
+dependencies = []
+
+[project.scripts]
+amon = "amon.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["amon*"]
