@@ -70,12 +70,23 @@ Implement `fps` and `frames()` (a generator of `Frame` objects), raise
   capture cards (`amon/sources/stream.py`).  Prefer numeric ``device``
   indices (portable across Linux/macOS/Windows); OpenCV selects the native
   backend via ``CAP_ANY``.  Native resolution and FPS are auto-detected;
-  `processing_scale` (percent of native size, aspect preserved) and
-  `processing_fps` optionally downscale and throttle output.  When the
-  configured device is unavailable, open alternatives are listed in the
-  error before the pipeline aborts.
+  ``processing_fps`` optionally throttles output.  When the configured
+  device is unavailable, open alternatives are listed in the error before
+  the pipeline aborts.
 
 Reference a plugin from the config by dotted class path; no core changes needed.
+
+## Preprocessing (`amon/preprocess.py`)
+
+After each frame leaves the video source, the pipeline runs
+``FramePreprocessor`` (config key ``preprocessing``):
+
+- ``scale`` — percent of input size, aspect preserved
+- ``rotate`` — degrees clockwise (90/180/270 use a fast OpenCV path)
+- ``brightness`` / ``contrast`` — ``out = contrast * image + brightness``
+
+Order is rotate → scale → brightness/contrast.  Identity defaults disable
+the stage.  Applies to every source type.
 
 ## Image-processing algorithms
 

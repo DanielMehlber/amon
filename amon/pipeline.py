@@ -13,6 +13,9 @@ Lifecycle:
    Finalised events are enqueued to the :class:`~amon.worker.BackgroundWorker`
    so GIF encoding and database writes never block frame processing.
 
+Every frame from the video source first passes through
+:class:`~amon.preprocess.FramePreprocessor` (``preprocessing`` config).
+
 The pipeline runs until the source is exhausted or ``stop`` is set.
 """
 
@@ -31,6 +34,7 @@ from amon.detectors import Detector
 from amon.model import AnomalyEvent, Frame
 from amon.names import generate_session_id
 from amon.plugins import instantiate
+from amon.preprocess import FramePreprocessor
 from amon.sources import VideoSource, source_label
 from amon.worker import BackgroundWorker
 
@@ -62,6 +66,7 @@ class Pipeline:
             else [instantiate(spec) for spec in config["detectors"]]
         )
         self.aggregator = EventAggregator(config["aggregation"])
+        self._preprocess = FramePreprocessor(config.get("preprocessing"))
         self.session_id: Optional[str] = None
 
         data_dir = Path(config["data_dir"])
@@ -113,6 +118,7 @@ class Pipeline:
                     break
                 if max_frames is not None and frame.index >= max_frames:
                     break
+                frame = self._preprocess(frame)
                 last_t = frame.timestamp
                 ring.append((frame.timestamp, frame.image))
 

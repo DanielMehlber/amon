@@ -154,43 +154,6 @@ class TestVideoInputStream:
             assert len(frames) == 3
             assert frames[1].timestamp == pytest.approx(0.1)
 
-    def test_processing_scale_preserves_aspect_ratio(self):
-        image = np.zeros((1080, 1920, 3), dtype=np.uint8)
-        with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:
-            _mock_open_capture(
-                capture_cls,
-                width=1920,
-                height=1080,
-                fps=30.0,
-                read_frames=[(True, image), (True, image), (False, None)],
-            )
-            with patch("amon.sources.stream.cv2.resize") as resize:
-                resize.return_value = np.zeros((540, 960, 3), dtype=np.uint8)
-                source = VideoInputStream({"device": 0, "processing_scale": 50})
-                assert source._output_size == (960, 540)
-                times = iter([0.0, 0.05])
-                with patch(
-                    "amon.sources.stream.time.monotonic",
-                    side_effect=lambda: next(times),
-                ):
-                    frame = next(source.frames())
-            resize.assert_called_once_with(
-                image, (960, 540), interpolation=cv2.INTER_AREA
-            )
-            assert frame.image.shape[:2] == (540, 960)
-
-    def test_processing_scale_100_skips_resize(self):
-        with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:
-            _mock_open_capture(capture_cls, width=1920, height=1080, fps=30.0)
-            source = VideoInputStream({"device": 0, "processing_scale": 100})
-            assert source._output_size is None
-
-    def test_invalid_processing_scale_raises(self):
-        with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:
-            _mock_open_capture(capture_cls)
-            with pytest.raises(SourceError, match="processing_scale"):
-                VideoInputStream({"device": 0, "processing_scale": 0})
-
     def test_reads_frames_from_device(self):
         image = np.zeros((240, 320, 3), dtype=np.uint8)
         with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:

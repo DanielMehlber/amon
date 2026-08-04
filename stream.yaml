@@ -1,8 +1,8 @@
 # AMON live video-input configuration (USB capture adapter, capture card, …).
 #
 # Adjust ``device`` to the OS index or path (e.g. 0 or /dev/video0).
-# Native resolution and FPS are auto-detected; optional processing_scale
-# (percent) and processing_fps downscale and throttle for the pipeline.
+# Native resolution and FPS are auto-detected.  Image transforms live under
+# ``preprocessing`` (scale / rotate / brightness / contrast).
 #
 #   python -m amon monitor stream.yaml
 #   python -m amon report stream.yaml
@@ -15,8 +15,13 @@ video_source:
   config:
     device: 0                # portable index (0, 1, …); or /dev/video0 on Linux
     # capture_fourcc: MJPG   # optional; depends on the capture device
-    processing_scale: 50     # percent of native size (aspect ratio preserved)
     processing_fps: 10       # optional cap; native rate auto-detected
+
+preprocessing:
+  scale: 50                  # percent of input size (aspect ratio preserved)
+  rotate: 0                  # degrees clockwise (90 / 180 / 270 use fast path)
+  brightness: 0              # additive offset [-255, 255]
+  contrast: 1.0              # multiplicative gain (1.0 = unchanged)
 
 calibration:
   duration_seconds: 10.0

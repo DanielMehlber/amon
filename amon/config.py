@@ -55,6 +55,13 @@ DEFAULTS: dict = {
         "lead_seconds": 1.0,  # context recorded before the event start
         "gif_max_fps": 10.0,
     },
+    # Applied to every frame after the video source (any source type).
+    "preprocessing": {
+        "scale": 100,       # percent of input size; 100 = no resize
+        "rotate": 0,        # degrees clockwise
+        "brightness": 0,    # additive [-255, 255]
+        "contrast": 1.0,    # multiplicative gain
+    },
     "report": {
         "port": 5006,
         # Serve Panel/Bokeh assets locally — required for air-gapped use.

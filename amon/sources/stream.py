@@ -6,8 +6,9 @@ capture cards, webcams.  Prefer a numeric ``device`` index (``0``, ``1``, …)
 as ``/dev/video0`` are accepted where the OS exposes them (typically Linux).
 
 Native resolution and frame rate are detected automatically.  Optional
-``processing_scale`` (percent) and ``processing_fps`` downscale and
-throttle frames before they reach the pipeline.
+``processing_fps`` throttles how many frames reach the pipeline.  Geometric
+and photometric transforms (scale, rotate, brightness, contrast) live in the
+top-level ``preprocessing`` config — see :mod:`amon.preprocess`.
 """
 
 from __future__ import annotations
@@ -130,34 +131,6 @@ def _estimate_fps(capture: cv2.VideoCapture, max_samples: int = 20) -> float:
     return count / elapsed
 
 
-def _processing_size(native: Size, config: dict) -> Optional[Size]:
-    """Return the (width, height) passed to the pipeline, if scaling.
-
-    ``processing_scale`` is a percentage of the native size (e.g. ``50`` =
-    half resolution).  Aspect ratio is always preserved.  ``100`` (or
-    omitting the key) leaves the native size unchanged.
-    """
-    if "processing_scale" not in config:
-        return None
-    try:
-        percent = float(config["processing_scale"])
-    except (TypeError, ValueError) as exc:
-        raise SourceError(
-            f"processing_scale must be a positive number (percent), "
-            f"got {config['processing_scale']!r}"
-        ) from exc
-    if percent <= 0:
-        raise SourceError(f"processing_scale must be positive, got {percent}")
-    if abs(percent - 100.0) < 1e-9:
-        return None
-
-    factor = percent / 100.0
-    native_w, native_h = native
-    width = max(1, int(round(native_w * factor)))
-    height = max(1, int(round(native_h * factor)))
-    return width, height
-
-
 class VideoInputStream(VideoSource):
     """Reads frames from a live capture device (USB adapter, capture card, …).
 
@@ -172,15 +145,15 @@ class VideoInputStream(VideoSource):
     - ``capture_buffer_size`` (default ``1``): driver buffer depth when
       supported; ``1`` minimises latency.
 
-    Processing (optional)
-    ---------------------
-    Native resolution and frame rate are detected automatically.  Use these
-    keys to limit what the monitoring pipeline receives:
+    Rate limiting (optional)
+    ------------------------
+    Native resolution and frame rate are detected automatically.
 
-    - ``processing_scale``: percentage of native resolution (aspect ratio
-      preserved), e.g. ``50`` → half width and height.
     - ``processing_fps``: maximum frame rate delivered to the pipeline;
       extra frames from the device are dropped.
+
+    Image transforms (scale, rotate, brightness, contrast) are configured
+    under the top-level ``preprocessing`` section, not here.
     """
 
     def __init__(self, config: dict = None):
@@ -214,7 +187,6 @@ class VideoInputStream(VideoSource):
                 "or set processing_fps to the expected rate"
             )
 
-        self._output_size = _processing_size(self._native_size, self.config)
         processing_fps = self.config.get("processing_fps")
         self._output_fps = (
             float(processing_fps) if processing_fps is not None else self._native_fps
@@ -228,15 +200,12 @@ class VideoInputStream(VideoSource):
         except Exception:
             pass
         log.info(
-            "Video input on %r (%s): native %dx%d @ %.2f fps → pipeline %s @ %.2f fps",
+            "Video input on %r (%s): native %dx%d @ %.2f fps → pipeline @ %.2f fps",
             self._device,
             backend or "unknown-backend",
             self._native_size[0],
             self._native_size[1],
             self._native_fps,
-            f"{self._output_size[0]}x{self._output_size[1]}"
-            if self._output_size
-            else f"{self._native_size[0]}x{self._native_size[1]}",
             self._output_fps,
         )
 
@@ -284,13 +253,6 @@ class VideoInputStream(VideoSource):
             ):
                 continue
             last_emit = now
-
-            if self._output_size is not None:
-                image = cv2.resize(
-                    image,
-                    self._output_size,
-                    interpolation=cv2.INTER_AREA,
-                )
 
             yield Frame(index=index, timestamp=index / self._output_fps, image=image)
             index += 1

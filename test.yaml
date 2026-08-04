@@ -14,6 +14,13 @@ video_source:
     path: test-video.avi
     realtime: false        # true paces playback like a live stream
 
+# Optional image transforms (also used by stream.yaml):
+# preprocessing:
+#   scale: 100
+#   rotate: 0
+#   brightness: 0
+#   contrast: 1.0
+
 calibration:
   duration_seconds: 10.0
 

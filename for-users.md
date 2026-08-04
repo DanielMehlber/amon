@@ -78,8 +78,11 @@ important keys:
 | `video_source.config.path` | The video file to monitor (file source). |
 | `video_source.config.device` | Capture device index or path (stream source). |
 | `video_source.config.processing_fps` | Max FPS delivered to the pipeline (stream). |
-| `video_source.config.processing_scale` | Scale percent of native size, aspect preserved (stream). |
 | `video_source.config.realtime` | `true` paces playback like a live stream (file source). |
+| `preprocessing.scale` | Scale percent of frame size (aspect preserved). |
+| `preprocessing.rotate` | Clockwise rotation in degrees. |
+| `preprocessing.brightness` | Additive brightness offset `[-255, 255]`. |
+| `preprocessing.contrast` | Contrast gain (`1.0` = unchanged). |
 | `calibration.duration_seconds` | Length of the automatic calibration phase. |
 | `detectors` | Which detector plugins to load and their settings. |
 | `aggregation.suppresses` | The exclusion hierarchy that prevents false positives. |
@@ -89,14 +92,30 @@ important keys:
 Detector thresholds are **not** configured - they are learned automatically
 during calibration.
 
+### Preprocessing
+
+Frames from any video source pass through an optional preprocessing stage
+before calibration/detection:
+
+```yaml
+preprocessing:
+  scale: 50        # percent of input size (aspect ratio preserved)
+  rotate: 90       # degrees clockwise
+  brightness: 10   # additive [-255, 255]
+  contrast: 1.2    # multiplicative gain
+```
+
+Order: rotate → scale → brightness/contrast.  Defaults leave the image
+unchanged.
+
 ### Live video input
 
 Use `stream.yaml` and set `device` to a portable index (`0`, `1`, …) or,
 on Linux, a path such as `/dev/video0`.  Native resolution and frame rate
-are detected automatically; optional `processing_scale` (percent of native
-size, aspect ratio preserved) and `processing_fps` downscale and throttle
-the stream so the pipeline is not overwhelmed.  If the device cannot be
-opened, available alternatives are listed in the error message.
+are detected automatically; optional `processing_fps` throttles capture.
+Image transforms (`scale`, `rotate`, `brightness`, `contrast`) are set
+under `preprocessing`.  If the device cannot be opened, available
+alternatives are listed in the error message.
 
 ## Running a monitoring session
 
