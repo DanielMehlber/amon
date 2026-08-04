@@ -1,4 +1,4 @@
-# Deprecated: use test.yaml (file / synthetic) or hdmi.yaml (live capture).
+# Deprecated: use test.yaml (file / synthetic) or stream.yaml (live capture).
 # Kept as an alias of test.yaml so older docs and scripts keep working.
 
 session_name: test

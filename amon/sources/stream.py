@@ -1,10 +1,13 @@
-"""Live HDMI capture source via OpenCV ``VideoCapture``.
+"""Live video capture source via OpenCV ``VideoCapture``.
 
-Typical setup: an HDMI capture card (USB or PCIe) appears as a V4L2 device
-on Linux (``/dev/video0``), a DirectShow device on Windows, or an AVFoundation
-device on macOS.  The native stream resolution and frame rate are detected
-automatically; optional ``processing_*`` settings downscale and throttle
-frames before they reach the pipeline.
+Works with any camera-style input OpenCV can open: USB capture adapters,
+capture cards, webcams.  Prefer a numeric ``device`` index (``0``, ``1``, …)
+— that form is portable across Linux, macOS and Windows.  Device paths such
+as ``/dev/video0`` are accepted where the OS exposes them (typically Linux).
+
+Native resolution and frame rate are detected automatically.  Optional
+``processing_scale`` (percent) and ``processing_fps`` downscale and
+throttle frames before they reach the pipeline.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ import cv2
 from amon.model import Frame
 from amon.sources import SourceError, VideoSource
 
-log = logging.getLogger("amon.sources.hdmi")
+log = logging.getLogger("amon.sources.stream")
 
 Device = Union[int, str]
 Size = Tuple[int, int]
@@ -28,31 +31,52 @@ Size = Tuple[int, int]
 _MAX_DEVICE_PROBE = 10
 
 
+def _open_capture(device: Device) -> cv2.VideoCapture:
+    """Open a capture handle in a backend-agnostic way.
+
+    Integer indices use ``CAP_ANY`` so OpenCV picks the host's native
+    backend (V4L2 / DirectShow / AVFoundation / …).  String identifiers
+    (device paths or backend-specific names) are passed through as-is.
+    """
+    if isinstance(device, int):
+        return cv2.VideoCapture(device, cv2.CAP_ANY)
+    return cv2.VideoCapture(device, cv2.CAP_ANY)
+
+
 def list_capture_devices(max_probe: int = _MAX_DEVICE_PROBE) -> List[str]:
-    """Return identifiers for capture devices that OpenCV can open."""
+    """Return identifiers for capture devices that OpenCV can open.
+
+    Always probes numeric indices (portable).  Also includes ``/dev/video*``
+    paths when they exist on the host — empty on Windows/macOS, no OS check
+    required.
+    """
     found: List[str] = []
     seen = set()
 
-    for path in sorted(glob.glob("/dev/video*")):
-        if _probe_capture_device(path):
-            found.append(path)
-            seen.add(path)
-
     for index in range(max_probe):
         key = str(index)
-        if key in seen:
-            continue
         if _probe_capture_device(index):
             found.append(key)
             seen.add(key)
+
+    for path in sorted(glob.glob("/dev/video*")):
+        if path in seen:
+            continue
+        if _probe_capture_device(path):
+            found.append(path)
+            seen.add(path)
 
     return found
 
 
 def _probe_capture_device(device: Device) -> bool:
-    capture = cv2.VideoCapture(device)
+    """True if the device opens and yields at least one frame."""
+    capture = _open_capture(device)
     try:
-        return capture.isOpened()
+        if not capture.isOpened():
+            return False
+        ok, frame = capture.read()
+        return bool(ok and frame is not None)
     finally:
         capture.release()
 
@@ -73,6 +97,7 @@ def _parse_device(device) -> Device:
 
 
 def _detect_stream_size(capture: cv2.VideoCapture) -> Size:
+    """Prefer a real frame's shape; CAP_PROP_* alone is unreliable on some backends."""
     width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
     ok, image = capture.read()
@@ -106,42 +131,54 @@ def _estimate_fps(capture: cv2.VideoCapture, max_samples: int = 20) -> float:
 
 
 def _processing_size(native: Size, config: dict) -> Optional[Size]:
-    """Return the (width, height) passed to the pipeline, if downscaling."""
-    width = config.get("processing_width")
-    height = config.get("processing_height")
-    if width is None and height is None:
+    """Return the (width, height) passed to the pipeline, if scaling.
+
+    ``processing_scale`` is a percentage of the native size (e.g. ``50`` =
+    half resolution).  Aspect ratio is always preserved.  ``100`` (or
+    omitting the key) leaves the native size unchanged.
+    """
+    if "processing_scale" not in config:
         return None
+    try:
+        percent = float(config["processing_scale"])
+    except (TypeError, ValueError) as exc:
+        raise SourceError(
+            f"processing_scale must be a positive number (percent), "
+            f"got {config['processing_scale']!r}"
+        ) from exc
+    if percent <= 0:
+        raise SourceError(f"processing_scale must be positive, got {percent}")
+    if abs(percent - 100.0) < 1e-9:
+        return None
+
+    factor = percent / 100.0
     native_w, native_h = native
-    if width is not None and height is not None:
-        return int(width), int(height)
-    if width is not None:
-        scale = int(width) / native_w
-        return int(width), max(1, int(round(native_h * scale)))
-    scale = int(height) / native_h
-    return max(1, int(round(native_w * scale))), int(height)
+    width = max(1, int(round(native_w * factor)))
+    height = max(1, int(round(native_h * factor)))
+    return width, height
 
 
-class HdmiCaptureSource(VideoSource):
-    """Reads frames from a live HDMI (or other) capture device.
+class VideoInputStream(VideoSource):
+    """Reads frames from a live capture device (USB adapter, capture card, …).
 
     Config keys:
 
     Input
     -----
-    - ``device`` (required): capture device index (``0``, ``1``, …) or path
-      (``/dev/video0`` on Linux).
+    - ``device`` (required): portable capture index (``0``, ``1``, …) or a
+      host-specific path/name (e.g. ``/dev/video0`` on Linux).
     - ``capture_fourcc``: optional pixel format negotiated with the hardware
-      (e.g. ``"MJPG"``).
-    - ``capture_buffer_size`` (default ``1``): driver buffer depth; ``1``
-      minimises latency.
+      (e.g. ``"MJPG"``).  Ignored by backends that do not support it.
+    - ``capture_buffer_size`` (default ``1``): driver buffer depth when
+      supported; ``1`` minimises latency.
 
     Processing (optional)
     ---------------------
     Native resolution and frame rate are detected automatically.  Use these
     keys to limit what the monitoring pipeline receives:
 
-    - ``processing_width``, ``processing_height``: downscale each frame
-      (aspect ratio preserved when only one dimension is set).
+    - ``processing_scale``: percentage of native resolution (aspect ratio
+      preserved), e.g. ``50`` → half width and height.
     - ``processing_fps``: maximum frame rate delivered to the pipeline;
       extra frames from the device are dropped.
     """
@@ -151,10 +188,11 @@ class HdmiCaptureSource(VideoSource):
         if "device" not in self.config:
             raise SourceError("video_source config requires a 'device'")
         self._device = _parse_device(self.config["device"])
-        self._capture = cv2.VideoCapture(self._device)
+        self._capture = _open_capture(self._device)
         if not self._capture.isOpened():
             self._raise_device_unavailable()
 
+        # Best-effort: some backends ignore BUFFERSIZE / FOURCC; that is fine.
         buffer_size = self.config.get("capture_buffer_size", 1)
         self._capture.set(cv2.CAP_PROP_BUFFERSIZE, float(buffer_size))
 
@@ -172,7 +210,7 @@ class HdmiCaptureSource(VideoSource):
         self._native_fps = _detect_stream_fps(self._capture)
         if self._native_fps <= 0:
             raise SourceError(
-                "cannot determine capture frame rate; check the HDMI signal "
+                "cannot determine capture frame rate; check the input signal "
                 "or set processing_fps to the expected rate"
             )
 
@@ -184,9 +222,15 @@ class HdmiCaptureSource(VideoSource):
         if self._output_fps <= 0:
             raise SourceError("processing_fps must be positive")
 
+        backend = ""
+        try:
+            backend = self._capture.getBackendName()
+        except Exception:
+            pass
         log.info(
-            "HDMI capture on %r: native %dx%d @ %.2f fps → pipeline %s @ %.2f fps",
+            "Video input on %r (%s): native %dx%d @ %.2f fps → pipeline %s @ %.2f fps",
             self._device,
+            backend or "unknown-backend",
             self._native_size[0],
             self._native_size[1],
             self._native_fps,

@@ -24,7 +24,7 @@ pip-sync requirements.txt
 python -m amon synth test-video.avi      # synthetic demo video
 python -m amon monitor test.yaml         # file-based test session
 python -m amon report test.yaml          # inspect results in the browser
-# Live capture: python -m amon monitor hdmi.yaml
+# Live capture: python -m amon monitor stream.yaml
 ```
 
 ### Offline USB bundle
@@ -37,7 +37,7 @@ On the offline target:
 
 ```bat
 amon.bat monitor test.yaml
-# or: amon.bat monitor hdmi.yaml
+# or: amon.bat monitor stream.yaml
 ```
 
 ## Tests

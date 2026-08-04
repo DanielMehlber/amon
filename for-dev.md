@@ -66,11 +66,14 @@ Implement `fps` and `frames()` (a generator of `Frame` objects), raise
 `SourceError` when the stream cannot be opened. Bundled implementations:
 
 - `VideoFileSource` — pre-recorded files (`amon/sources/file.py`)
-- `HdmiCaptureSource` — live HDMI / capture-card devices
-  (`amon/sources/hdmi.py`).  Native resolution and FPS are auto-detected;
-  `processing_*` config keys optionally downscale and throttle output.
-  When the configured device is unavailable, open alternatives are listed
-  in the error before the pipeline aborts.
+- `VideoInputStream` — live capture devices such as USB adapters or
+  capture cards (`amon/sources/stream.py`).  Prefer numeric ``device``
+  indices (portable across Linux/macOS/Windows); OpenCV selects the native
+  backend via ``CAP_ANY``.  Native resolution and FPS are auto-detected;
+  `processing_scale` (percent of native size, aspect preserved) and
+  `processing_fps` optionally downscale and throttle output.  When the
+  configured device is unavailable, open alternatives are listed in the
+  error before the pipeline aborts.
 
 Reference a plugin from the config by dotted class path; no core changes needed.
 

@@ -53,11 +53,12 @@ python -m amon monitor test.yaml
 python -m amon report test.yaml     # opens the browser UI
 ```
 
-For live HDMI / capture-card input use `hdmi.yaml` instead (adjust `device`):
+For live capture-card / USB adapter input use `stream.yaml` instead
+(adjust `device`):
 
 ```bash
-python -m amon monitor hdmi.yaml
-python -m amon report hdmi.yaml
+python -m amon monitor stream.yaml
+python -m amon report stream.yaml
 ```
 
 ## Configuration
@@ -67,7 +68,7 @@ Two ready-made configs ship with the project:
 | File | Purpose |
 |---|---|
 | `test.yaml` | File source — synthetic / recorded `test-video.avi` |
-| `hdmi.yaml` | Live HDMI / capture-card input |
+| `stream.yaml` | Live video input (USB adapter, capture card, webcam) |
 
 All behaviour is controlled by the YAML file you pass to the CLI. The most
 important keys:
@@ -75,10 +76,9 @@ important keys:
 | Key | Meaning |
 |---|---|
 | `video_source.config.path` | The video file to monitor (file source). |
-| `video_source.config.device` | Capture device index or path (HDMI source). |
-| `video_source.config.processing_fps` | Max FPS delivered to the pipeline (HDMI). |
-| `video_source.config.processing_width` | Downscale width for the pipeline (HDMI). |
-| `video_source.config.processing_height` | Downscale height for the pipeline (HDMI). |
+| `video_source.config.device` | Capture device index or path (stream source). |
+| `video_source.config.processing_fps` | Max FPS delivered to the pipeline (stream). |
+| `video_source.config.processing_scale` | Scale percent of native size, aspect preserved (stream). |
 | `video_source.config.realtime` | `true` paces playback like a live stream (file source). |
 | `calibration.duration_seconds` | Length of the automatic calibration phase. |
 | `detectors` | Which detector plugins to load and their settings. |
@@ -89,20 +89,20 @@ important keys:
 Detector thresholds are **not** configured - they are learned automatically
 during calibration.
 
-### Live HDMI input
+### Live video input
 
-Use `hdmi.yaml` and set `device` to the OS index or path (e.g. `0` or
-`/dev/video0`).  Native resolution and frame rate are detected automatically;
-optional `processing_width`, `processing_height` and `processing_fps`
-downscale and throttle the stream so the pipeline is not overwhelmed.  If the
-device cannot be opened, available alternatives are listed in the error
-message.
+Use `stream.yaml` and set `device` to a portable index (`0`, `1`, …) or,
+on Linux, a path such as `/dev/video0`.  Native resolution and frame rate
+are detected automatically; optional `processing_scale` (percent of native
+size, aspect ratio preserved) and `processing_fps` downscale and throttle
+the stream so the pipeline is not overwhelmed.  If the device cannot be
+opened, available alternatives are listed in the error message.
 
 ## Running a monitoring session
 
 ```bash
-python -m amon monitor test.yaml    # file demo
-python -m amon monitor hdmi.yaml    # live capture
+python -m amon monitor test.yaml      # file demo
+python -m amon monitor stream.yaml    # live capture
 ```
 
 The session starts with the calibration phase (the video should show
@@ -115,7 +115,7 @@ in the background while monitoring continues in real time.
 ## Viewing reports
 
 ```bash
-python -m amon report test.yaml     # or hdmi.yaml
+python -m amon report test.yaml     # or stream.yaml
 ```
 
 opens the report UI in your browser (port from `report.port`, default

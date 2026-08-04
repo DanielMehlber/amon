@@ -18,7 +18,7 @@ On the offline machine::
 
     amon.bat synth test-video.avi
     amon.bat monitor test.yaml      # file demo
-    amon.bat monitor hdmi.yaml      # live capture
+    amon.bat monitor stream.yaml    # live capture
 """
 
 from __future__ import annotations
@@ -351,7 +351,7 @@ def copy_app_sources(bundle: Path, lockfile: Path) -> None:
     for name in (
         "config.yaml",
         "test.yaml",
-        "hdmi.yaml",
+        "stream.yaml",
         "for-users.md",
         "README.md",
         "pyproject.toml",
