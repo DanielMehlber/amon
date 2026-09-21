@@ -121,7 +121,9 @@ masks (`gray > bright_threshold`) and the temporal max image; the union
 mask is dilated and split into connected components = HUD elements. Per
 element it learns: bounding box, centroid, pixel count, text (via the
 offline glyph matcher in `textocr.py`, Otsu-binarised, matched against
-Hershey font templates with an aspect-ratio weight) and the blink toggle
+Hershey font templates with an aspect-ratio weight; components smaller
+than `min_glyph_height` / `min_glyph_area` are ignored so tiny IR
+bright speckles are not read as letters) and the blink toggle
 rate. Detection re-locates each element inside a search window around its
 calibrated box and emits four intensities: normalised Levenshtein text
 distance, centroid shift (px), relative box-area change, and toggle-rate

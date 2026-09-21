@@ -70,6 +70,8 @@ class HudDetector(Detector):
             "search_margin": 20,  # px around the calibrated box searched
             "blink_window_seconds": 2.0,  # sliding window for the toggle rate
             "min_element_area": 15,  # ignore bright specks below this size
+            "min_glyph_height": 8,  # min glyph height (px) — filters IR speckles
+            "min_glyph_area": 20,  # min bright pixels per glyph component
             "merge_kernel": 15,  # dilation size merging glyphs to elements
             "visible_fraction": 0.25,  # bright-pixel fraction counting as visible
             "sigma_k": 8.0,
@@ -141,7 +143,7 @@ class HudDetector(Detector):
         self, box: Box, union: np.ndarray, masks: List[np.ndarray]
     ) -> CalibratedHudElement:
         x, y, w, h = box
-        text = read_text(self._max_img[y : y + h, x : x + w])
+        text = self._read_element_text(self._max_img[y : y + h, x : x + w])
         element_id = slugify(text) or f"elem{x}x{y}"
         while element_id in self._elements:  # ensure uniqueness
             element_id += "x"
@@ -309,10 +311,18 @@ class HudDetector(Detector):
 
         # Read the text from the bounding box and calculate the Levenshtein distance
         # (character similarity) between the current text and the calibrated text.
-        text = read_text(gray[by0 : by0 + bh, bx0 : bx0 + bw])
+        text = self._read_element_text(gray[by0 : by0 + bh, bx0 : bx0 + bw])
         levenshtein_distance = levenshtein_norm(text, element.text)
 
         return pos_error, size_error, levenshtein_distance
+
+    def _read_element_text(self, gray: np.ndarray) -> str:
+        """OCR a HUD crop, ignoring connected components below min glyph size."""
+        return read_text(
+            gray,
+            min_glyph_height=int(self.config["min_glyph_height"]),
+            min_glyph_area=int(self.config["min_glyph_area"]),
+        )
 
     @staticmethod
     def _is_hud_element_visible(mask: np.ndarray, box: Box, pixel_count: int) -> bool:

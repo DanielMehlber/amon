@@ -81,6 +81,14 @@ class TestTextOcr:
         )
         assert read_text(canvas) == "CAM 01"
 
+    def test_rejects_tiny_speckles(self):
+        """Sub-min-size bright blobs must not be matched as letters."""
+        canvas = np.zeros((40, 40), np.uint8)
+        canvas[10:13, 10:13] = 255  # 3x3 speck — below default min height/area
+        assert read_text(canvas) == ""
+        # Same speck is accepted only if thresholds are lowered
+        assert read_text(canvas, min_glyph_height=2, min_glyph_area=4) != ""
+
     def test_empty_image_reads_empty(self):
         assert read_text(np.zeros((20, 20), np.uint8)) == ""
 

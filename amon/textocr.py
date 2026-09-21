@@ -88,11 +88,21 @@ def _match_char(glyph: np.ndarray, aspect: float) -> str:
     return best_char
 
 
-def read_text(gray: np.ndarray, threshold: Optional[int] = None) -> str:
+def read_text(
+    gray: np.ndarray,
+    threshold: Optional[int] = None,
+    *,
+    min_glyph_height: int = 8,
+    min_glyph_area: int = 20,
+) -> str:
     """Recognise bright text in a grayscale crop, including word spaces.
 
     Without an explicit ``threshold`` the text/background split is found
     with Otsu's method, which keeps anti-aliased stroke edges intact.
+
+    Connected components smaller than ``min_glyph_height`` (px) or
+    ``min_glyph_area`` (bright pixels) are ignored — this rejects tiny
+    bright IR speckles that would otherwise match letter templates.
     """
     # Find the threshold for the text/background split using Otsu's method.
     if threshold is None:
@@ -102,11 +112,14 @@ def read_text(gray: np.ndarray, threshold: Optional[int] = None) -> str:
     binary = (gray > threshold).astype(np.uint8)
     count, _, stats, _ = cv2.connectedComponentsWithStats(binary)
 
-    # Find the bounding boxes of the text/background split.
+    min_h = max(1, int(min_glyph_height))
+    min_area = max(1, int(min_glyph_area))
+
+    # Find the bounding boxes of glyph-sized components only.
     boxes: List[tuple] = []
     for i in range(1, count):
         x, y, w, h, area = stats[i]
-        if area >= 6 and h >= 5:
+        if h >= min_h and area >= min_area:
             boxes.append((x, y, w, h))
 
     if not boxes:
