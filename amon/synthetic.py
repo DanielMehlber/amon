@@ -15,12 +15,13 @@ from typing import List, Optional, Set, Tuple, Union
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+from amon.textocr import resolve_glyph_font
 
 WIDTH, HEIGHT = 320, 240
 FPS = 20.0
 DURATION = 86.0
-
-FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 #: Infrared landscape photograph shipped next to this module (package data).
 BACKGROUND_IMAGE = Path(__file__).resolve().with_name("infrared-landscape.png")
@@ -125,10 +126,14 @@ class SyntheticVideo:
 
     @staticmethod
     def _draw_text(img: np.ndarray, text: str, org: Tuple[int, int], scale: float) -> None:
-        """White text overlay — no backing plate or icons."""
-        cv2.putText(
-            img, text, org, FONT, 0.6 * scale, (255, 255, 255), 2, cv2.LINE_AA,
-        )
+        """White HUD text using the same TrueType font as glyph matching."""
+        font_size = max(10, int(round(18 * scale)))
+        font = ImageFont.truetype(str(resolve_glyph_font()), size=font_size)
+        # OpenCV ``org`` is the baseline; PIL places text at the top-left.
+        top_left = (org[0], max(0, org[1] - font_size))
+        pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        ImageDraw.Draw(pil).text(top_left, text, fill=(255, 255, 255), font=font)
+        img[:] = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
 
     def _hud_text(self, spec: HudSpec, active: Set[str]) -> str:
         if spec.key == "cam" and "hud_text" in active:

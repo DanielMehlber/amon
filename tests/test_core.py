@@ -8,8 +8,6 @@ from amon.plugins import instantiate, load_class
 from amon.stats import robust_threshold
 from amon.textocr import levenshtein_norm, read_text, slugify
 
-import cv2
-
 
 class TestRobustThreshold:
     def test_empty_samples_fall_back_to_floor(self):
@@ -67,19 +65,17 @@ class TestPlugins:
 
 
 class TestTextOcr:
+    def _render_text(self, text: str, size: int = 28) -> np.ndarray:
+        from amon.textocr import resolve_glyph_font
+        from PIL import Image, ImageDraw, ImageFont
+
+        font = ImageFont.truetype(str(resolve_glyph_font()), size=size)
+        img = Image.new("L", (220, 48), 0)
+        ImageDraw.Draw(img).text((8, 8), text, fill=255, font=font)
+        return np.asarray(img)
+
     def test_reads_rendered_text(self):
-        canvas = np.zeros((40, 200), np.uint8)
-        cv2.putText(
-            canvas,
-            "CAM 01",
-            (10, 28),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            255,
-            1,
-            cv2.LINE_AA,
-        )
-        assert read_text(canvas) == "CAM 01"
+        assert read_text(self._render_text("CAM 01")) == "CAM 01"
 
     def test_rejects_tiny_speckles(self):
         """Sub-min-size bright blobs must not be matched as letters."""
@@ -89,8 +85,22 @@ class TestTextOcr:
         # Same speck is accepted only if thresholds are lowered
         assert read_text(canvas, min_glyph_height=2, min_glyph_area=4) != ""
 
+    def test_rejects_oversized_blobs(self):
+        """Large bright regions must not be treated as glyphs."""
+        canvas = np.zeros((120, 120), np.uint8)
+        canvas[10:100, 10:100] = 255  # 90x90 — above default max height/width
+        assert read_text(canvas) == ""
+        assert read_text(canvas, max_glyph_height=100, max_glyph_width=100) != ""
+
     def test_empty_image_reads_empty(self):
         assert read_text(np.zeros((20, 20), np.uint8)) == ""
+
+    def test_resolve_default_font(self):
+        from amon.textocr import DEFAULT_GLYPH_FONT, resolve_glyph_font
+
+        path = resolve_glyph_font()
+        assert path.name == DEFAULT_GLYPH_FONT
+        assert path.is_file()
 
     def test_slugify(self):
         assert slugify("CAM 01") == "cam01"

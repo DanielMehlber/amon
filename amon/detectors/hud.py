@@ -71,7 +71,11 @@ class HudDetector(Detector):
             "blink_window_seconds": 2.0,  # sliding window for the toggle rate
             "min_element_area": 15,  # ignore bright specks below this size
             "min_glyph_height": 8,  # min glyph height (px) — filters IR speckles
+            "max_glyph_height": 64,  # max glyph height (px) — rejects large non-text blobs
+            "max_glyph_width": 64,  # max glyph width (px)
             "min_glyph_area": 20,  # min bright pixels per glyph component
+            # TrueType under amon/fonts/ (or absolute path); default VCR OSD Mono
+            "glyph_font": "VCR_OSD_MONO_1.001.ttf",
             "merge_kernel": 15,  # dilation size merging glyphs to elements
             "visible_fraction": 0.25,  # bright-pixel fraction counting as visible
             "sigma_k": 8.0,
@@ -317,11 +321,14 @@ class HudDetector(Detector):
         return pos_error, size_error, levenshtein_distance
 
     def _read_element_text(self, gray: np.ndarray) -> str:
-        """OCR a HUD crop, ignoring connected components below min glyph size."""
+        """OCR a HUD crop, keeping only components within the glyph size bounds."""
         return read_text(
             gray,
             min_glyph_height=int(self.config["min_glyph_height"]),
+            max_glyph_height=int(self.config["max_glyph_height"]),
+            max_glyph_width=int(self.config["max_glyph_width"]),
             min_glyph_area=int(self.config["min_glyph_area"]),
+            glyph_font=str(self.config.get("glyph_font") or ""),
         )
 
     @staticmethod

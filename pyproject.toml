@@ -20,4 +20,4 @@ amon = "amon.__main__:main"
 include = ["amon*"]
 
 [tool.setuptools.package-data]
-amon = ["*.png"]
+amon = ["*.png", "fonts/*"]

@@ -151,6 +151,24 @@ class EventAggregator:
                     closed.append(event) if event else discarded.append(aid)
         return opened, closed, discarded
 
+    def peek_open(self) -> Dict[str, AnomalyEvent]:
+        """Snapshots of still-open events with ``end`` set to last-above time."""
+        snapshots: Dict[str, AnomalyEvent] = {}
+        for aid, state in self._open.items():
+            event = state.event
+            snapshots[aid] = AnomalyEvent(
+                anomaly_id=event.anomaly_id,
+                detector=event.detector,
+                start=event.start,
+                end=state.last_above,
+                max_intensity=event.max_intensity,
+                threshold=event.threshold,
+                timeline=list(event.timeline),
+                metadata=dict(event.metadata),
+                regions=list(event.regions),
+            )
+        return snapshots
+
     def flush(self) -> List[AnomalyEvent]:
         """Close all events that are still open (called at stream end)."""
         closed = [self._close(aid) for aid in list(self._open)]

@@ -121,9 +121,11 @@ masks (`gray > bright_threshold`) and the temporal max image; the union
 mask is dilated and split into connected components = HUD elements. Per
 element it learns: bounding box, centroid, pixel count, text (via the
 offline glyph matcher in `textocr.py`, Otsu-binarised, matched against
-Hershey font templates with an aspect-ratio weight; components smaller
-than `min_glyph_height` / `min_glyph_area` are ignored so tiny IR
-bright speckles are not read as letters) and the blink toggle
+TrueType templates (default: bundled VCR OSD Mono under `amon/fonts/`;
+override with `glyph_font`); components outside
+`min_glyph_height`…`max_glyph_height` / `max_glyph_width` or below
+`min_glyph_area` are ignored so tiny IR speckles and large non-text
+blobs are not read as letters) and the blink toggle
 rate. Detection re-locates each element inside a search window around its
 calibrated box and emits four intensities: normalised Levenshtein text
 distance, centroid shift (px), relative box-area change, and toggle-rate
@@ -147,7 +149,10 @@ points are attached as highlights.
 machine: an event opens at threshold crossing, stays open while intensity
 re-crosses within `cooldown_seconds`, and is dropped if shorter than
 `min_duration_seconds`. Continuous anomalies therefore produce exactly
-one event.
+one event. Open events are also written to the database as `status=ongoing`
+(refreshed about once per second) so a live report refresh can show
+anomalies that have not closed yet; closing promotes the same row to
+`completed` and attaches the evidence GIF.
 
 The `suppresses` config maps suppressor patterns to target patterns
 (`*` matches greedily across path segments). While a suppressor anomaly is

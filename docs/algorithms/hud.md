@@ -19,7 +19,14 @@ deliberately bright UI pixels qualify.
 **Idea:** HUD fonts are simple and fixed. We do not need a neural OCR
 engine — we **segment** each character as a blob, resize it to a standard
 size, and **compare** it to pre-rendered templates of `A–Z` and `0–9`
-(drawn with the same font OpenCV uses elsewhere). The best match wins.
+drawn from a configurable TrueType font (default: bundled **VCR OSD Mono**
+in `amon/fonts/`). The best match wins. Drop an alternate `.ttf` in that
+folder and set `glyph_font` on `HudDetector` to switch.
+
+**Size gates:** Components shorter than `min_glyph_height`, taller than
+`max_glyph_height`, wider than `max_glyph_width`, or with fewer than
+`min_glyph_area` bright pixels are ignored — this filters IR speckles and
+large non-text bright regions.
 
 **Otsu thresholding** picks a text/background split per crop so
 anti-aliased edges survive binarization.

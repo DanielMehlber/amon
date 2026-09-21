@@ -1,9 +1,18 @@
 """Background process for all blocking I/O (database writes, GIF encoding).
 
-The monitoring pipeline must never stall on disk I/O, so finalised events
-and calibration results are handed over through a multiprocessing queue to
-a worker process which generates media and writes to the database.  The
-queue is unbounded: enqueueing is a memory copy and returns immediately.
+The monitoring pipeline must never stall on disk I/O, so event lifecycle
+jobs and calibration results are handed over through a multiprocessing
+queue to a worker process which generates media and writes to the
+database.  The queue is unbounded: enqueueing is a memory copy and
+returns immediately.
+
+Job kinds:
+
+- ``open`` / ``open_update`` — persist or refresh an *ongoing* event so the
+  report can show anomalies that have not closed yet;
+- ``discard`` — drop an ongoing row that failed the minimum-duration gate;
+- ``event`` — finalise an event (media + ``completed`` status);
+- ``calibration`` — store calibration thresholds / review media.
 """
 
 from __future__ import annotations
@@ -42,6 +51,14 @@ class BackgroundWorker:
     def start(self) -> None:
         self._process.start()
 
+    def submit_open(self, event: AnomalyEvent) -> None:
+        """Queue an ongoing-event insert/refresh (no media yet)."""
+        self._queue.put(("open", event))
+
+    def submit_discard(self, anomaly_id: str) -> None:
+        """Queue removal of an ongoing event that was too short to report."""
+        self._queue.put(("discard", anomaly_id))
+
     def submit_event(
         self, event: AnomalyEvent, frames: List[Tuple[float, np.ndarray]], fps: float
     ) -> None:
@@ -75,14 +92,21 @@ def _worker_main(
             job = queue.get()
             if job is None:
                 return
-            if job[0] == "event":
+            kind = job[0]
+            if kind == "open":
+                _, event = job
+                db.upsert_ongoing_event(session_id, event)
+            elif kind == "discard":
+                _, anomaly_id = job
+                db.discard_ongoing_event(session_id, anomaly_id)
+            elif kind == "event":
                 _, event, frames, fps = job
                 path = _handle_media(
                     lambda p: media.write_event_gif(frames, event, p, fps, gif_fps),
                     media_root / session_id,
                 )
-                db.insert_event(session_id, event, media=path)
-            elif job[0] == "calibration":
+                db.complete_event(session_id, event, media=path)
+            elif kind == "calibration":
                 _, thresholds, annotations, frames, fps = job
                 path = _handle_media(
                     lambda p: media.write_calibration_gif(

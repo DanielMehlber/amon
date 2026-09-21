@@ -30,7 +30,10 @@ detectors:
   - class: amon.detectors.temporal.TemporalDetector
     config: {}
   - class: amon.detectors.hud.HudDetector
-    config: {}
+    config:
+      glyph_font: VCR_OSD_MONO_1.001.ttf   # file under amon/fonts/ (or absolute path)
+      # max_glyph_height: 64              # reject oversized bright blobs as letters
+      # max_glyph_width: 64
   - class: amon.detectors.spatial.SpatialDetector
     config: {}
 

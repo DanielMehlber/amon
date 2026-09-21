@@ -9,8 +9,9 @@ Lifecycle:
 2. **Monitoring** - each frame's detector intensities are compared against
    the calibrated thresholds by the :class:`~amon.aggregate.EventAggregator`.
    While an event is open the pipeline captures an evidence clip (a little
-   lead-in from the ring buffer plus up to ``media.max_clip_seconds``).
-   Finalised events are enqueued to the :class:`~amon.worker.BackgroundWorker`
+   lead-in from the ring buffer plus up to ``media.max_clip_seconds``) and
+   also persists the event as ``ongoing`` so a live report refresh can show
+   it.  Finalised events are enqueued to the :class:`~amon.worker.BackgroundWorker`
    so GIF encoding and database writes never block frame processing.
 
 Every frame from the video source first passes through
@@ -42,6 +43,9 @@ log = logging.getLogger("amon.pipeline")
 
 #: Length of the annotated calibration review clip.
 CALIBRATION_CLIP_SECONDS = 2.0
+
+#: How often ongoing events are refreshed in the DB for live report views.
+OPEN_SYNC_INTERVAL_SECONDS = 1.0
 
 
 class Pipeline:
@@ -80,6 +84,7 @@ class Pipeline:
         self._detector_of: Dict[str, Detector] = {}
         self._clips: Dict[str, List[Tuple[float, np.ndarray]]] = {}
         self._enrichment: Dict[str, Tuple[dict, list]] = {}
+        self._last_open_sync = 0.0
 
     def run(self, max_frames: Optional[int] = None, stop=None) -> str:
         """Process the stream until it ends; returns the session ID."""
@@ -174,6 +179,7 @@ class Pipeline:
         for anomaly_id in discarded:  # too short to report - free capture state
             self._clips.pop(anomaly_id, None)
             self._enrichment.pop(anomaly_id, None)
+            worker.submit_discard(anomaly_id)
 
         for anomaly_id in opened:
             detector = self._detector_of[anomaly_id]
@@ -184,6 +190,13 @@ class Pipeline:
             # Start the evidence clip with lead-in frames from the ring buffer.
             lead_start = frame.timestamp - self._lead
             self._clips[anomaly_id] = [(t, img) for t, img in ring if t >= lead_start]
+            self._publish_open(anomaly_id, worker)
+
+        if frame.timestamp - self._last_open_sync >= OPEN_SYNC_INTERVAL_SECONDS:
+            for anomaly_id in self.aggregator.peek_open():
+                if anomaly_id not in opened:
+                    self._publish_open(anomaly_id, worker)
+            self._last_open_sync = frame.timestamp
 
         for anomaly_id, clip in self._clips.items():
             if (
@@ -195,6 +208,17 @@ class Pipeline:
 
         for event in closed:
             self._finalize_event(event, worker, fps)
+
+    def _publish_open(self, anomaly_id: str, worker: BackgroundWorker) -> None:
+        """Persist / refresh an ongoing event so live reports can show it."""
+        snapshots = self.aggregator.peek_open()
+        event = snapshots.get(anomaly_id)
+        if event is None:
+            return
+        metadata, regions = self._enrichment.get(anomaly_id, ({}, []))
+        event.metadata = metadata
+        event.regions = regions
+        worker.submit_open(event)
 
     def _finalize_event(
         self, event: AnomalyEvent, worker: BackgroundWorker, fps: float

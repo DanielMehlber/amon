@@ -37,6 +37,35 @@ SORT_OPTIONS = {
     "Peak intensity (highest first)": lambda e: -e["max_intensity"],
 }
 
+_PENDING_CSS = f"""
+@keyframes amon-spin {{
+    to {{ transform: rotate(360deg); }}
+}}
+.amon-pending-spinner {{
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    margin-right: 0.45em;
+    border: 2px solid {ACCENT_LIGHT};
+    border-top-color: {ACCENT};
+    border-radius: 50%;
+    vertical-align: -0.1em;
+    animation: amon-spin 0.8s linear infinite;
+}}
+.amon-pending-badge {{
+    display: inline-block;
+    margin-left: 0.5em;
+    padding: 0.1em 0.55em;
+    border-radius: 999px;
+    background: {ACCENT_LIGHT};
+    color: {ACCENT_DARK};
+    font-size: 0.75em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+}}
+"""
+
 
 def _session_label(session: dict) -> str:
     status = "" if session["status"] == "completed" else f" [{session['status']}]"
@@ -81,8 +110,20 @@ def _json_block(data) -> pn.pane.Markdown:
     return pn.pane.Markdown(f"```json\n{text}\n```")
 
 
+def _is_ongoing(event: dict) -> bool:
+    return event.get("status") == "ongoing"
+
+
 def _event_summary(event: dict) -> str:
     """One-line label for a collapsed catalogue card."""
+    if _is_ongoing(event):
+        # Plain text: Accordion titles escape HTML, so no spinner markup here.
+        return (
+            f"⟳ ONGOING · {event['anomaly_id']}  ·  "
+            f"since {event['start']:.1f}s  ·  "
+            f"{event['duration']:.1f}s so far  ·  "
+            f"peak {event['max_intensity']:.2f}"
+        )
     return (
         f"{event['anomaly_id']}  ·  "
         f"{event['start']:.1f}s → {event['end']:.1f}s  ·  "
@@ -93,15 +134,34 @@ def _event_summary(event: dict) -> str:
 
 def event_detail(event: dict) -> pn.Column:
     """Expanded card body: media, stats, intensity plot, metadata."""
+    if _is_ongoing(event):
+        timing = (
+            f"- **Status:** ongoing "
+            f'<span class="amon-pending-spinner" aria-hidden="true"></span>\n'
+            f"- **Started:** {event['start']:.2f} s\n"
+            f"- **Elapsed so far:** {event['duration']:.2f} s\n"
+        )
+        media_note = (
+            "\n*Evidence GIF is generated when the anomaly ends "
+            "(returns below threshold or session finishes).*\n"
+        )
+    else:
+        timing = (
+            f"- **Start:** {event['start']:.2f} s\n"
+            f"- **End:** {event['end']:.2f} s\n"
+            f"- **Duration:** {event['duration']:.2f} s\n"
+        )
+        media_note = ""
+
     stats = pn.pane.Markdown(
         f"#### {event['anomaly_id']}\n\n"
         f"- **Detector:** `{event['detector']}`\n"
-        f"- **Start:** {event['start']:.2f} s\n"
-        f"- **End:** {event['end']:.2f} s\n"
-        f"- **Duration:** {event['duration']:.2f} s\n"
+        f"{timing}"
         f"- **Peak intensity:** {event['max_intensity']:.3f}\n"
-        f"- **Threshold:** {event['threshold']:.3f}\n",
+        f"- **Threshold:** {event['threshold']:.3f}\n"
+        f"{media_note}",
         styles={"padding": "0.5rem 1rem"},
+        stylesheets=[_PENDING_CSS],
     )
 
     media_pane = None
@@ -112,13 +172,30 @@ def event_detail(event: dict) -> pn.Column:
             styles={"border": f"2px solid {ACCENT}", "border-radius": "6px"},
         )
 
-    header = pn.Row(
-        pn.Column(media_pane or pn.Spacer(width=0), width=420, margin=(0, 16, 0, 0)),
-        pn.Column(stats, sizing_mode="stretch_width"),
-        sizing_mode="stretch_width",
+    header_bits = []
+    if _is_ongoing(event):
+        header_bits.append(
+            pn.Row(
+                pn.indicators.LoadingSpinner(
+                    value=True, width=28, height=28, color="danger"
+                ),
+                pn.pane.Markdown(
+                    "**Still ongoing** — refresh the report to update elapsed time "
+                    "and peak intensity.",
+                    styles={"color": ACCENT_DARK},
+                ),
+                sizing_mode="stretch_width",
+            )
+        )
+    header_bits.append(
+        pn.Row(
+            pn.Column(media_pane or pn.Spacer(width=0), width=420, margin=(0, 16, 0, 0)),
+            pn.Column(stats, sizing_mode="stretch_width"),
+            sizing_mode="stretch_width",
+        )
     )
 
-    parts = [header, pn.pane.Bokeh(intensity_figure(event, width=680))]
+    parts = [*header_bits, pn.pane.Bokeh(intensity_figure(event, width=680))]
     if event["metadata"]:
         parts.append(pn.pane.Markdown("**Detector metadata**"))
         parts.append(_json_block(event["metadata"]))
@@ -143,6 +220,7 @@ def _event_catalog(
         )
 
     cards = [(_event_summary(event), event_detail(event)) for event in chosen]
+    ongoing = sum(1 for event in events if _is_ongoing(event))
     catalogue = pn.Accordion(
         *cards,
         active=[],
@@ -150,6 +228,7 @@ def _event_catalog(
         sizing_mode="stretch_width",
         stylesheets=[
             f"""
+            {_PENDING_CSS}
             :host .accordion-button {{
                 font-weight: 600;
             }}
@@ -160,10 +239,16 @@ def _event_catalog(
         """
         ],
     )
+    ongoing_note = (
+        f" · **{ongoing}** ongoing"
+        if ongoing
+        else ""
+    )
     return pn.Column(
         pn.pane.Markdown(
-            f"**{len(chosen)}** of **{len(events)}** anomalies  \n"
-            "*Expand a card to see evidence, intensity plot and metadata.*"
+            f"**{len(chosen)}** of **{len(events)}** anomalies{ongoing_note}  \n"
+            "*Expand a card to see evidence, intensity plot and metadata. "
+            "Refresh the page while a session is running to update ongoing anomalies.*"
         ),
         catalogue,
         scroll=True,
@@ -329,16 +414,19 @@ def session_view(config: dict, session_id: str) -> pn.Column:
     finished = ""
     if session.get("finished_at"):
         finished = f" · finished {format_wall_time(session['finished_at'])}"
+    ongoing = sum(1 for event in events if event.get("status") == "ongoing")
+    ongoing_bit = f" · **{ongoing}** ongoing" if ongoing else ""
     header = pn.pane.Markdown(
         f"## {session['id']}\n"
         f"**Started** {format_wall_time(session['started_at'])}{finished}  \n"
         f"<span style='color:{status_color};font-weight:600'>{session['status'].upper()}</span>"
-        f" · **{len(events)}** anomalies · source `{session['source']}`"
+        f" · **{len(events)}** anomalies{ongoing_bit} · source `{session['source']}`"
         + (
             f" · config `{session['name']}`"
             if session.get("name") and session["name"] != session["id"]
             else ""
         ),
+        stylesheets=[_PENDING_CSS],
     )
     body = pn.Tabs(
         (

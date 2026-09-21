@@ -11,6 +11,7 @@ COLUMNS = (
     "event_id",
     "anomaly_id",
     "detector",
+    "status",
     "start_s",
     "end_s",
     "duration_s",
@@ -44,13 +45,18 @@ def write_events_csv(session: dict, events: List[dict], out_path: Path) -> Path:
                     "event_id": event["id"],
                     "anomaly_id": event["anomaly_id"],
                     "detector": event["detector"],
+                    "status": event.get("status") or "completed",
                     "start_s": f"{event['start']:.3f}",
                     "end_s": f"{event['end']:.3f}",
                     "duration_s": f"{event['duration']:.3f}",
                     "max_intensity": f"{event['max_intensity']:.6f}",
                     "threshold": f"{event['threshold']:.6f}",
                     "start_time": _wall_time(session_start, event["start"]),
-                    "end_time": _wall_time(session_start, event["end"]),
+                    "end_time": (
+                        ""
+                        if event.get("status") == "ongoing"
+                        else _wall_time(session_start, event["end"])
+                    ),
                     "media": event.get("media") or "",
                 }
             )

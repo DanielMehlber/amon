@@ -5,6 +5,10 @@ sessions.  Media files (GIFs) live next to it and are referenced by
 relative paths, so the whole data directory can be archived or moved.
 Timestamps of events are stored in seconds relative to the session start;
 the session row carries the absolute wall-clock start time.
+
+Events may be ``ongoing`` (still above threshold) or ``completed``.  The
+report UI surfaces ongoing rows while a session is running so a refresh
+shows anomalies that have not closed yet.
 """
 
 from __future__ import annotations
@@ -16,6 +20,9 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from amon.model import AnomalyEvent
+
+EVENT_STATUS_ONGOING = "ongoing"
+EVENT_STATUS_COMPLETED = "completed"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -47,7 +54,8 @@ CREATE TABLE IF NOT EXISTS events (
     timeline TEXT NOT NULL,
     metadata TEXT NOT NULL,
     regions TEXT NOT NULL,
-    media TEXT
+    media TEXT,
+    status TEXT NOT NULL DEFAULT 'completed'
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, start);
 """
@@ -62,6 +70,22 @@ class Database:
         self._conn = sqlite3.connect(str(self.path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns / indexes introduced after the initial schema."""
+        columns = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(events)").fetchall()
+        }
+        if "status" not in columns:
+            self._conn.execute(
+                "ALTER TABLE events ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
+            )
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_ongoing "
+            "ON events(session_id, anomaly_id) WHERE status = 'ongoing'"
+        )
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -127,16 +151,98 @@ class Database:
         return data
 
     # --- events -------------------------------------------------------------
-    def insert_event(
+    def _event_values(
+        self,
+        session_id: str,
+        event: AnomalyEvent,
+        media: Optional[str],
+        status: str,
+    ) -> tuple:
+        return (
+            session_id,
+            event.anomaly_id,
+            event.detector,
+            event.start,
+            event.end,
+            event.duration,
+            event.max_intensity,
+            event.threshold,
+            json.dumps(event.timeline),
+            json.dumps(event.metadata),
+            json.dumps(event.regions),
+            media,
+            status,
+        )
+
+    def upsert_ongoing_event(
+        self, session_id: str, event: AnomalyEvent
+    ) -> int:
+        """Insert or refresh the single ongoing row for ``event.anomaly_id``."""
+        existing = self._conn.execute(
+            "SELECT id FROM events WHERE session_id = ? AND anomaly_id = ?"
+            " AND status = ?",
+            (session_id, event.anomaly_id, EVENT_STATUS_ONGOING),
+        ).fetchone()
+        values = self._event_values(
+            session_id, event, media=None, status=EVENT_STATUS_ONGOING
+        )
+        if existing is None:
+            cursor = self._conn.execute(
+                "INSERT INTO events (session_id, anomaly_id, detector, start, end,"
+                " duration, max_intensity, threshold, timeline, metadata, regions,"
+                " media, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                values,
+            )
+            self._conn.commit()
+            return int(cursor.lastrowid)
+
+        self._conn.execute(
+            "UPDATE events SET detector = ?, start = ?, end = ?, duration = ?,"
+            " max_intensity = ?, threshold = ?, timeline = ?, metadata = ?,"
+            " regions = ? WHERE id = ?",
+            (
+                event.detector,
+                event.start,
+                event.end,
+                event.duration,
+                event.max_intensity,
+                event.threshold,
+                json.dumps(event.timeline),
+                json.dumps(event.metadata),
+                json.dumps(event.regions),
+                int(existing["id"]),
+            ),
+        )
+        self._conn.commit()
+        return int(existing["id"])
+
+    def complete_event(
         self, session_id: str, event: AnomalyEvent, media: Optional[str] = None
     ) -> int:
-        cursor = self._conn.execute(
-            "INSERT INTO events (session_id, anomaly_id, detector, start, end, duration,"
-            " max_intensity, threshold, timeline, metadata, regions, media)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        """Promote an ongoing row to completed, or insert if none exists."""
+        existing = self._conn.execute(
+            "SELECT id FROM events WHERE session_id = ? AND anomaly_id = ?"
+            " AND status = ?",
+            (session_id, event.anomaly_id, EVENT_STATUS_ONGOING),
+        ).fetchone()
+        values = self._event_values(
+            session_id, event, media=media, status=EVENT_STATUS_COMPLETED
+        )
+        if existing is None:
+            cursor = self._conn.execute(
+                "INSERT INTO events (session_id, anomaly_id, detector, start, end,"
+                " duration, max_intensity, threshold, timeline, metadata, regions,"
+                " media, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                values,
+            )
+            self._conn.commit()
+            return int(cursor.lastrowid)
+
+        self._conn.execute(
+            "UPDATE events SET detector = ?, start = ?, end = ?, duration = ?,"
+            " max_intensity = ?, threshold = ?, timeline = ?, metadata = ?,"
+            " regions = ?, media = ?, status = ? WHERE id = ?",
             (
-                session_id,
-                event.anomaly_id,
                 event.detector,
                 event.start,
                 event.end,
@@ -147,10 +253,27 @@ class Database:
                 json.dumps(event.metadata),
                 json.dumps(event.regions),
                 media,
+                EVENT_STATUS_COMPLETED,
+                int(existing["id"]),
             ),
         )
         self._conn.commit()
-        return int(cursor.lastrowid)
+        return int(existing["id"])
+
+    def discard_ongoing_event(self, session_id: str, anomaly_id: str) -> None:
+        """Drop an ongoing row that failed ``min_duration_seconds``."""
+        self._conn.execute(
+            "DELETE FROM events WHERE session_id = ? AND anomaly_id = ?"
+            " AND status = ?",
+            (session_id, anomaly_id, EVENT_STATUS_ONGOING),
+        )
+        self._conn.commit()
+
+    def insert_event(
+        self, session_id: str, event: AnomalyEvent, media: Optional[str] = None
+    ) -> int:
+        """Persist a completed event (compatibility alias for :meth:`complete_event`)."""
+        return self.complete_event(session_id, event, media=media)
 
     def list_events(self, session_id: str) -> List[dict]:
         rows = self._conn.execute(
@@ -169,4 +292,7 @@ class Database:
         data = dict(row)
         for key in ("timeline", "metadata", "regions"):
             data[key] = json.loads(data[key])
+        data.setdefault("status", EVENT_STATUS_COMPLETED)
+        if not data.get("status"):
+            data["status"] = EVENT_STATUS_COMPLETED
         return data

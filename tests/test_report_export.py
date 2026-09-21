@@ -58,6 +58,7 @@ class TestCsvExport:
 
         assert len(rows) == len(events)
         assert rows[0]["anomaly_id"] == events[0]["anomaly_id"]
+        assert rows[0]["status"] == "completed"
         assert rows[0]["start_s"]
         assert rows[0]["start_time"]
         assert float(rows[0]["duration_s"]) == pytest.approx(events[0]["duration"], abs=0.001)

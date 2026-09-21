@@ -139,14 +139,26 @@ def write_html_report(
 
     parts.append(f"<h2>Events ({len(events)})</h2>")
     for event in events:
+        ongoing = event.get("status") == "ongoing"
+        title = html.escape(event["anomaly_id"])
+        if ongoing:
+            title = f"{title} <em>(ongoing)</em>"
+        if ongoing:
+            timing = (
+                f"since {event['start']:.2f}s "
+                f"({event['duration']:.2f}s so far), peak {event['max_intensity']:.3f} "
+                f"vs threshold {event['threshold']:.3f}"
+            )
+        else:
+            timing = (
+                f"{event['start']:.2f}s – {event['end']:.2f}s "
+                f"({event['duration']:.2f}s), peak {event['max_intensity']:.3f} "
+                f"vs threshold {event['threshold']:.3f}"
+            )
         parts += [
             "<section class='event'>",
-            f"<h3>{html.escape(event['anomaly_id'])}</h3>",
-            "<p>",
-            f"{event['start']:.2f}s – {event['end']:.2f}s "
-            f"({event['duration']:.2f}s), peak {event['max_intensity']:.3f} "
-            f"vs threshold {event['threshold']:.3f}",
-            "</p>",
+            f"<h3>{title}</h3>",
+            f"<p>{timing}</p>",
         ]
         if event.get("media"):
             uri = _media_data_uri(event["media"])

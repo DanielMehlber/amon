@@ -91,6 +91,15 @@ class TestEventAggregator:
         assert len(closed) == 1
         assert closed[0].end == pytest.approx(2.9)
 
+    def test_peek_open_exposes_provisional_end(self):
+        agg = make_aggregator()
+        feed(agg, [0.0, 0.1, 0.2], lambda t: 5.0)
+        open_events = agg.peek_open()
+        assert list(open_events) == ["a"]
+        assert open_events["a"].start == pytest.approx(0.0)
+        assert open_events["a"].end == pytest.approx(0.2)
+        assert open_events["a"].duration == pytest.approx(0.2)
+
     def test_suppressed_anomaly_creates_no_event(self):
         agg = make_aggregator(suppresses={"primary": ["secondary"]})
         for i in range(30):
