@@ -198,19 +198,10 @@ class Pipeline:
                 )
 
         opened, closed, discarded = self.aggregator.update(frame.timestamp, readings)
-        if log.isEnabledFor(logging.DEBUG):
-            above = [
-                f"{aid}={readings[aid].intensity:.4f}>={readings[aid].threshold:.4f}"
-                for aid in sorted(readings)
-                if readings[aid].intensity >= readings[aid].threshold
-            ]
+        if opened or closed or discarded:
             log.debug(
-                "t=%.3fs frame=%d readings=%d above_threshold=[%s] opened=%s "
-                "closed=%s discarded=%s",
+                "t=%.3fs aggregation: opened=%s closed=%s discarded=%s",
                 frame.timestamp,
-                frame.index,
-                len(readings),
-                ", ".join(above) or "none",
                 opened,
                 [event.anomaly_id for event in closed],
                 discarded,
@@ -220,11 +211,6 @@ class Pipeline:
             self._clips.pop(anomaly_id, None)
             self._enrichment.pop(anomaly_id, None)
             worker.submit_discard(anomaly_id)
-            log.debug(
-                "t=%.3fs discarded ongoing DB row for %s (failed min_duration)",
-                frame.timestamp,
-                anomaly_id,
-            )
 
         for anomaly_id in opened:
             detector = self._detector_of[anomaly_id]

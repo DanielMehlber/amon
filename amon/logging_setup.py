@@ -91,7 +91,7 @@ def attach_session_log(config: Optional[dict], session_id: str) -> Path:
     amon.info("diagnostic log: %s", path.resolve())
     amon.debug(
         "diagnostic log levels: console=%s file=%s "
-        "(file DEBUG traces every intensity-vs-threshold decision and suppression)",
+        "(file DEBUG traces aggregation: OPEN/CLOSE/DISCARD/SUPPRESSED)",
         logging.getLevelName(console_level),
         logging.getLevelName(file_level),
     )

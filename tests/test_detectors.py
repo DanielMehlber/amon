@@ -5,13 +5,11 @@ scene, then fed frames from a scheduled anomaly window.  Ground truth comes
 from :mod:`amon.synthetic`.
 """
 
-import numpy as np
 import pytest
 
 from amon.detectors.hud import HudDetector
 from amon.detectors.spatial import SpatialDetector
 from amon.detectors.temporal import CONTRAST, FLICKER, NOISE, TemporalDetector
-from amon.synthetic import SyntheticVideo
 
 from .conftest import calibrate, make_frames
 
@@ -32,49 +30,58 @@ def peak_intensities(detector, scene, t0, t1, warmup=0.3):
     return peaks
 
 
-class TestTemporalDetector:
-    @pytest.fixture(scope="class")
-    def detector(self, scene):
-        detector = TemporalDetector()
-        calibrate(detector, scene)
-        return detector
+@pytest.fixture(scope="module")
+def temporal_detector(scene):
+    detector = TemporalDetector()
+    calibrate(detector, scene)
+    return detector
 
-    def test_calibration_produces_thresholds(self, detector):
-        thresholds = detector.thresholds()
+
+@pytest.fixture(scope="module")
+def hud_detector(scene):
+    detector = HudDetector()
+    calibrate(detector, scene)
+    return detector
+
+
+@pytest.fixture(scope="module")
+def spatial_detector(scene):
+    detector = SpatialDetector()
+    calibrate(detector, scene)
+    return detector
+
+
+class TestTemporalDetector:
+    def test_calibration_produces_thresholds(self, temporal_detector):
+        thresholds = temporal_detector.thresholds()
         assert set(thresholds) == {NOISE, FLICKER, CONTRAST}
         assert all(v > 0 for v in thresholds.values())
-        assert detector.mode == "detection"
+        assert temporal_detector.mode == "detection"
 
-    def test_clean_footage_stays_below_thresholds(self, detector, scene):
-        peaks = peak_intensities(detector, scene, 12.0, 15.0)
-        thresholds = detector.thresholds()
+    def test_clean_footage_stays_below_thresholds(self, temporal_detector, scene):
+        peaks = peak_intensities(temporal_detector, scene, 12.0, 15.0)
+        thresholds = temporal_detector.thresholds()
         for aid in thresholds:
             assert peaks[aid] < thresholds[aid], aid
 
-    def test_noise_window_fires_noise(self, detector, scene):
-        peaks = peak_intensities(detector, scene, 16.5, 18.5)
-        assert peaks[NOISE] > detector.thresholds()[NOISE]
-        assert peaks[FLICKER] < detector.thresholds()[FLICKER]
+    def test_noise_window_fires_noise(self, temporal_detector, scene):
+        peaks = peak_intensities(temporal_detector, scene, 16.5, 18.5)
+        assert peaks[NOISE] > temporal_detector.thresholds()[NOISE]
+        assert peaks[FLICKER] < temporal_detector.thresholds()[FLICKER]
 
-    def test_flicker_window_fires_flicker(self, detector, scene):
-        peaks = peak_intensities(detector, scene, 23.5, 25.5)
-        assert peaks[FLICKER] > detector.thresholds()[FLICKER]
+    def test_flicker_window_fires_flicker(self, temporal_detector, scene):
+        peaks = peak_intensities(temporal_detector, scene, 23.5, 25.5)
+        assert peaks[FLICKER] > temporal_detector.thresholds()[FLICKER]
 
-    def test_contrast_window_fires_contrast(self, detector, scene):
-        peaks = peak_intensities(detector, scene, 30.5, 32.5)
-        assert peaks[CONTRAST] > detector.thresholds()[CONTRAST]
-        assert peaks[NOISE] < detector.thresholds()[NOISE]
+    def test_contrast_window_fires_contrast(self, temporal_detector, scene):
+        peaks = peak_intensities(temporal_detector, scene, 30.5, 32.5)
+        assert peaks[CONTRAST] > temporal_detector.thresholds()[CONTRAST]
+        assert peaks[NOISE] < temporal_detector.thresholds()[NOISE]
 
 
 class TestHudDetector:
-    @pytest.fixture(scope="class")
-    def detector(self, scene):
-        detector = HudDetector()
-        calibrate(detector, scene)
-        return detector
-
-    def test_calibration_finds_four_elements(self, detector):
-        elements = detector._elements
+    def test_calibration_finds_four_elements(self, hud_detector):
+        elements = hud_detector._elements
         assert len(elements) == 4
         texts = {e.text for e in elements.values()}
         assert "CAM01" in texts
@@ -83,14 +90,14 @@ class TestHudDetector:
         assert blink_rates[0] == pytest.approx(0.0, abs=0.3)  # static labels
         assert blink_rates[-1] == pytest.approx(4.0, abs=0.8)  # 2 Hz REC blinker
 
-    def test_static_label_text_is_read(self, detector):
-        texts = {e.text for e in detector._elements.values()}
+    def test_static_label_text_is_read(self, hud_detector):
+        texts = {e.text for e in hud_detector._elements.values()}
         assert "CAM 01" in texts or "CAM01" in texts
 
-    def test_anomaly_ids_cover_all_aspects(self, detector):
-        thresholds = detector.thresholds()
+    def test_anomaly_ids_cover_all_aspects(self, hud_detector):
+        thresholds = hud_detector.thresholds()
         assert "hud/new" in thresholds
-        for element_id in detector._elements:
+        for element_id in hud_detector._elements:
             for aspect in ("text", "position", "size", "blink"):
                 assert f"hud/{element_id}/{aspect}" in thresholds
 
@@ -169,43 +176,37 @@ class TestHudDetector:
             > detector.thresholds()[f"hud/{blinker}/blink"]
         )
 
-    def test_metadata_and_regions(self, detector):
-        label = self._label_id(detector)
-        metadata = detector.metadata(f"hud/{label}/text")
+    def test_metadata_and_regions(self, hud_detector):
+        label = self._label_id(hud_detector)
+        metadata = hud_detector.metadata(f"hud/{label}/text")
         assert metadata["element"] == label
-        assert detector.regions(f"hud/{label}/text")
+        assert hud_detector.regions(f"hud/{label}/text")
 
 
 class TestSpatialDetector:
-    @pytest.fixture(scope="class")
-    def detector(self, scene):
-        detector = SpatialDetector()
-        calibrate(detector, scene)
-        return detector
-
-    def test_calibration_finds_keypoints_outside_hud(self, detector):
-        points = detector._points.reshape(-1, 2)
+    def test_calibration_finds_keypoints_outside_hud(self, spatial_detector):
+        points = spatial_detector._points.reshape(-1, 2)
         assert len(points) >= 20
         # Most corners should sit on the landscape, not on HUD overlays.
         assert (points[:, 1] > 26).mean() > 0.95
 
-    def test_clean_footage_stays_below_threshold(self, detector, scene):
-        threshold = detector.thresholds()["spatial/distortion"]
-        peaks = peak_intensities(detector, scene, 12.0, 15.0)
+    def test_clean_footage_stays_below_threshold(self, spatial_detector, scene):
+        threshold = spatial_detector.thresholds()["spatial/distortion"]
+        peaks = peak_intensities(spatial_detector, scene, 12.0, 15.0)
         assert peaks["spatial/distortion"] < threshold
 
-    def test_distortion_detected_and_localised(self, detector, scene):
-        threshold = detector.thresholds()["spatial/distortion"]
-        peaks = peak_intensities(detector, scene, 72.5, 74.5)
+    def test_distortion_detected_and_localised(self, spatial_detector, scene):
+        threshold = spatial_detector.thresholds()["spatial/distortion"]
+        peaks = peak_intensities(spatial_detector, scene, 72.5, 74.5)
         assert peaks["spatial/distortion"] > threshold
 
-        regions = detector.regions("spatial/distortion")
+        regions = spatial_detector.regions("spatial/distortion")
         assert regions
         # Affine warp moves terrain features; at least one highlight should sit
         # on the hillside rather than in the top/bottom HUD strips.
         assert any(40 < ry + rh / 2 < 195 for _, ry, _, rh in regions)
 
-    def test_hud_changes_are_ignored(self, detector, scene):
-        threshold = detector.thresholds()["spatial/distortion"]
-        peaks = peak_intensities(detector, scene, 37.5, 39.5)  # HUD text change window
+    def test_hud_changes_are_ignored(self, spatial_detector, scene):
+        threshold = spatial_detector.thresholds()["spatial/distortion"]
+        peaks = peak_intensities(spatial_detector, scene, 37.5, 39.5)  # HUD text change window
         assert peaks["spatial/distortion"] < threshold

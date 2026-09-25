@@ -83,6 +83,7 @@ class Reading:
 class _OpenEvent:
     event: AnomalyEvent
     last_above: float
+    cooling: bool = False  # True after the first below-threshold frame
 
 
 class EventAggregator:
@@ -136,11 +137,12 @@ class EventAggregator:
             reading = readings[aid]
             if blocker is not None:
                 currently_suppressed.add(aid)
-                detail = (
-                    "t=%.3fs SUPPRESSED %s: intensity=%.4f >= threshold=%.4f "
-                    "(detector=%s) blocked by suppressor %s "
-                    "(raw_above_threshold=%s linger_eligible=%s)"
-                    % (
+                if self._suppress_streak.get(aid) != blocker:
+                    log.debug(
+                        "t=%.3fs SUPPRESSED %s: intensity=%.4f >= threshold=%.4f "
+                        "(detector=%s) blocked by suppressor %s — will NOT become "
+                        "an anomaly while this suppressor is active "
+                        "(raw_above_threshold=%s linger_eligible=%s)",
                         t,
                         aid,
                         reading.intensity,
@@ -150,15 +152,7 @@ class EventAggregator:
                         sorted(raw),
                         sorted(suppressors - raw),
                     )
-                )
-                if self._suppress_streak.get(aid) != blocker:
-                    log.debug(
-                        "%s — event will NOT open/continue while this suppressor is active",
-                        detail,
-                    )
                     self._suppress_streak[aid] = blocker
-                else:
-                    log.debug("%s", detail)
             else:
                 firing.add(aid)
 
@@ -170,22 +164,6 @@ class EventAggregator:
                     aid,
                     self._suppress_streak.pop(aid),
                 )
-
-        for aid, reading in readings.items():
-            if aid in raw:
-                continue
-            margin = reading.threshold - reading.intensity
-            log.debug(
-                "t=%.3fs BELOW_THRESHOLD %s: intensity=%.4f < threshold=%.4f "
-                "(shortfall=%.4f, detector=%s, event_open=%s)",
-                t,
-                aid,
-                reading.intensity,
-                reading.threshold,
-                margin,
-                reading.detector,
-                aid in self._open,
-            )
 
         opened: List[str] = []
         closed: List[AnomalyEvent] = []
@@ -209,26 +187,19 @@ class EventAggregator:
                     opened.append(aid)
                     log.debug(
                         "t=%.3fs OPEN %s: intensity=%.4f >= threshold=%.4f "
-                        "(detector=%s) — event started; will stay open until "
-                        "intensity stays below threshold for cooldown=%.2fs",
+                        "(detector=%s); stays open until below threshold for "
+                        "cooldown=%.2fs, then kept only if duration >= "
+                        "min_duration=%.2fs",
                         t,
                         aid,
                         reading.intensity,
                         reading.threshold,
                         reading.detector,
                         self.cooldown,
+                        self.min_duration,
                     )
                 else:
-                    log.debug(
-                        "t=%.3fs CONTINUE %s: intensity=%.4f >= threshold=%.4f "
-                        "(open since %.3fs, peak_so_far=%.4f)",
-                        t,
-                        aid,
-                        reading.intensity,
-                        reading.threshold,
-                        state.event.start,
-                        state.event.max_intensity,
-                    )
+                    state.cooling = False
                 state.last_above = t
                 state.event.max_intensity = max(
                     state.event.max_intensity, reading.intensity
@@ -237,15 +208,28 @@ class EventAggregator:
             elif state is not None:
                 self._append_point(state, t, reading.intensity)
                 below_for = t - state.last_above
+                if not state.cooling:
+                    state.cooling = True
+                    log.debug(
+                        "t=%.3fs COOLDOWN_START %s: intensity=%.4f dropped below "
+                        "threshold=%.4f after being above since %.3fs "
+                        "(peak_so_far=%.4f); close after cooldown=%.2fs below",
+                        t,
+                        aid,
+                        reading.intensity,
+                        reading.threshold,
+                        state.event.start,
+                        state.event.max_intensity,
+                        self.cooldown,
+                    )
                 if below_for >= self.cooldown:
                     duration_so_far = state.last_above - state.event.start
                     event = self._close(aid)
                     if event:
                         closed.append(event)
                         log.debug(
-                            "t=%.3fs CLOSE %s: was above threshold from %.3fs to "
-                            "%.3fs (duration=%.3fs, peak=%.4f, threshold=%.4f); "
-                            "closed after %.3fs below threshold (cooldown=%.2fs)",
+                            "t=%.3fs CLOSE %s: %.3fs-%.3fs (duration=%.3fs, "
+                            "peak=%.4f, threshold=%.4f) — will be reported",
                             t,
                             aid,
                             event.start,
@@ -253,16 +237,13 @@ class EventAggregator:
                             event.duration,
                             event.max_intensity,
                             event.threshold,
-                            below_for,
-                            self.cooldown,
                         )
                     else:
                         discarded.append(aid)
                         log.debug(
-                            "t=%.3fs DISCARD %s: was above threshold from %.3fs to "
-                            "%.3fs (duration=%.3fs) but shorter than "
-                            "min_duration_seconds=%.2fs — treated as glitch, "
-                            "not written as an anomaly event",
+                            "t=%.3fs DISCARD %s: was above threshold %.3fs-%.3fs "
+                            "(duration=%.3fs) but shorter than "
+                            "min_duration_seconds=%.2fs — NOT reported as an anomaly",
                             t,
                             aid,
                             state.event.start,
@@ -270,19 +251,6 @@ class EventAggregator:
                             duration_so_far,
                             self.min_duration,
                         )
-                else:
-                    log.debug(
-                        "t=%.3fs COOLDOWN %s: intensity=%.4f < threshold=%.4f "
-                        "but only %.3fs below so far (need cooldown=%.2fs); "
-                        "event still open since %.3fs",
-                        t,
-                        aid,
-                        reading.intensity,
-                        reading.threshold,
-                        below_for,
-                        self.cooldown,
-                        state.event.start,
-                    )
         return opened, closed, discarded
 
     def peek_open(self) -> Dict[str, AnomalyEvent]:

@@ -75,6 +75,13 @@ def _widget_caption(text: str) -> dict:
     return {"name": text}
 
 
+def _button_style(style: str = "primary") -> dict:
+    """Button style kwarg: ``color`` on Panel 1.9+, ``button_type`` on older."""
+    if "color" in pn.widgets.Button.param:
+        return {"color": style}
+    return {"button_type": style}
+
+
 def _session_label(session: dict) -> str:
     status = "" if session["status"] == "completed" else f" [{session['status']}]"
     started = format_wall_time(session["started_at"])
@@ -311,7 +318,9 @@ def events_tab(config: dict, session_id: str, events: list) -> pn.Column:
     )
 
     export_button = pn.widgets.Button(
-        **_widget_caption("Export events as CSV"), button_type="primary", width=200
+        **_widget_caption("Export events as CSV"),
+        **_button_style("primary"),
+        width=200,
     )
     export_status = pn.pane.Markdown("")
 
@@ -399,7 +408,7 @@ def export_tab(config: dict, session_id: str) -> pn.Column:
         **_widget_caption("Format"), options=list(EXPORTERS)
     )
     button = pn.widgets.Button(
-        **_widget_caption("Export report"), button_type="primary"
+        **_widget_caption("Export report"), **_button_style("primary")
     )
     status = pn.pane.Markdown("")
 

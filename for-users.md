@@ -114,8 +114,8 @@ Overrides: `python -m amon monitor test.yaml --log-level DEBUG` sets the
 
 At console `INFO` you only see session start/finish, calibration complete, and
 each detected anomaly (`event <id>: start-end (duration, peak)`). File `DEBUG`
-adds thresholds, OPEN/CLOSE/DISCARD, suppression reasons, and per-frame
-intensity-vs-threshold comparisons.
+traces aggregation: OPEN / CLOSE / DISCARD / SUPPRESSED (and why a crossing
+did not become a reported anomaly). Quiet frames are not logged.
 
 ### Preprocessing
 

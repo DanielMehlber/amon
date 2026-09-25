@@ -158,8 +158,8 @@ anomalies that have not closed yet; closing promotes the same row to
 Per-run diagnostic logs go to `logging.dir` / `<session_id>.log` (default
 `logs/`). Console and file levels are set separately (`console_level`,
 `file_level`; defaults INFO / DEBUG). Use `file_level: DEBUG` (or
-`--log-level DEBUG`) to record every intensity-vs-threshold comparison and
-suppression reason — useful on field machines without a debugger.
+`--log-level DEBUG`) to record aggregation decisions (OPEN / CLOSE /
+DISCARD / SUPPRESSED) — useful on field machines without a debugger.
 
 The `suppresses` config maps suppressor patterns to target patterns
 (`*` matches greedily across path segments). While a suppressor anomaly is
