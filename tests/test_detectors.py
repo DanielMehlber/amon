@@ -96,10 +96,12 @@ class TestHudDetector:
 
     def test_anomaly_ids_cover_all_aspects(self, hud_detector):
         thresholds = hud_detector.thresholds()
-        assert "hud/new" in thresholds
+        # Calibrated elements expose text/position/size/blink; new overlays are
+        # registered dynamically when they appear (no static hud/new threshold).
         for element_id in hud_detector._elements:
             for aspect in ("text", "position", "size", "blink"):
                 assert f"hud/{element_id}/{aspect}" in thresholds
+        assert not any(aid.endswith("/new") for aid in thresholds)
 
     def test_clean_footage_stays_below_thresholds(self, scene):
         detector = HudDetector()
@@ -154,9 +156,13 @@ class TestHudDetector:
     def test_new_text_detected(self, scene):
         detector = self._fresh(scene, 66.0)
         peaks = peak_intensities(detector, scene, 69.2, 70.8)
-        assert peaks["hud/new"] > detector.thresholds()["hud/new"]
-        assert detector.metadata("hud/new")["count"] >= 1
-        assert detector.regions("hud/new")
+        new_aids = [aid for aid in peaks if aid.endswith("/new")]
+        assert len(new_aids) >= 2  # ALERT + WARN
+        thresholds = detector.thresholds()
+        for aid in new_aids:
+            assert peaks[aid] > thresholds[aid]
+            assert detector.metadata(aid).get("new") is True
+            assert detector.regions(aid)
 
     def test_blink_frequency_change_detected(self, scene):
         detector = self._fresh(scene, 41.0)

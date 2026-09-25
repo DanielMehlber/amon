@@ -6,11 +6,13 @@ configurable cooldown, so a continuous anomaly yields exactly one event.
 
 A configurable *exclusion hierarchy* suppresses side-effects of a primary
 anomaly (e.g. a flickering screen would otherwise also trigger HUD and
-spatial detections).  Rules map a suppressor pattern to target patterns
-where ``*`` greedily matches one or more path segments.  When suppressor
-and target patterns contain the same (non-zero) number of wildcards the
-captured values carry over, so ``"hud/*/size": ["hud/*/position"]`` only
-suppresses the position anomaly of the *same* HUD element.
+spatial detections).  Rules map a suppressor pattern to target patterns:
+
+- ``*`` matches one or more path characters with **no** capture binding
+  (``hud/*/text`` matches any element's text channel).
+- ``#`` matches one path segment and **binds** across suppressor and
+  target when both sides use the same number of ``#`` markers
+  (``hud/#/size`` → ``hud/#/text`` only suppresses the *same* element).
 """
 
 from __future__ import annotations
@@ -25,14 +27,39 @@ from amon.model import AnomalyEvent
 log = logging.getLogger("amon.aggregate")
 
 
-def _compile_regex(pattern: str) -> re.Pattern:
-    parts = [re.escape(p) for p in pattern.split("*")]
-    return re.compile("^" + "(.+)".join(parts) + "$")
+def _compile_pattern(pattern: str) -> Tuple[re.Pattern, int]:
+    """Compile a suppression pattern into ``(regex, hash_capture_count)``.
+
+    ``*`` → non-capturing ``(?:.+)`` (any span, no binding).
+    ``#`` → capturing ``([^/]+)`` (one segment, used for same-scope rules).
+    """
+    if pattern == "*":
+        return re.compile("^.+$"), 0
+
+    pieces: List[str] = []
+    hash_count = 0
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "*":
+            pieces.append("(?:.+)")
+            i += 1
+        elif ch == "#":
+            pieces.append("([^/]+)")
+            hash_count += 1
+            i += 1
+        else:
+            j = i
+            while j < len(pattern) and pattern[j] not in "*#":
+                j += 1
+            pieces.append(re.escape(pattern[i:j]))
+            i = j
+    return re.compile("^" + "".join(pieces) + "$"), hash_count
 
 
-def _substitute(pattern: str, captures: Tuple[str, ...]) -> str:
+def _substitute_hashes(pattern: str, captures: Tuple[str, ...]) -> str:
     for capture in captures:
-        pattern = pattern.replace("*", capture, 1)
+        pattern = pattern.replace("#", capture, 1)
     return pattern
 
 
@@ -41,7 +68,7 @@ class SuppressionRules:
 
     def __init__(self, rules: Dict[str, List[str]]):
         self._rules = [
-            (_compile_regex(sup), sup.count("*"), targets)
+            (*_compile_pattern(sup), targets)
             for sup, targets in (rules or {}).items()
         ]
 
@@ -56,16 +83,16 @@ class SuppressionRules:
         for suppressor in active:
             if suppressor == anomaly_id:
                 continue
-            for sup_re, sup_stars, targets in self._rules:
+            for sup_re, hash_count, targets in self._rules:
                 match = sup_re.match(suppressor)
                 if not match:
                     continue
                 captures = match.groups()
                 for target in targets:
-                    if sup_stars and target.count("*") == sup_stars:
-                        if _substitute(target, captures) == anomaly_id:
+                    if hash_count and target.count("#") == hash_count:
+                        if _substitute_hashes(target, captures) == anomaly_id:
                             return suppressor
-                    elif _compile_regex(target).match(anomaly_id):
+                    elif _compile_pattern(target)[0].match(anomaly_id):
                         return suppressor
         return None
 

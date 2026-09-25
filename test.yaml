@@ -50,12 +50,12 @@ aggregation:
   cooldown_seconds: 1.0
   min_duration_seconds: 0.5
   # Exclusion hierarchy: primary anomalies suppress their side-effects.
+  # '*' = any matching path (no element binding); '#' = same HUD element.
   suppresses:
     temporal/flicker: ["*"]
-    temporal/noise: ["temporal/contrast", "hud/*", "spatial/*"]
-    temporal/contrast: ["hud/*", "spatial/*"]
-    hud/*/size: ["hud/*/text", "hud/*/position"]
-    hud/*/position: ["hud/*/text"]
+    temporal/noise: ["temporal/contrast"]
+    hud/#/size: ["hud/#/text", "hud/#/position"]
+    hud/#/position: ["hud/#/text"]
 
 media:
   max_clip_seconds: 6.0

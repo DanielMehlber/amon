@@ -4,30 +4,54 @@ import pytest
 
 from amon.aggregate import EventAggregator, Reading, SuppressionRules
 
+#: Production-like rules using ``#`` for same-element HUD scope.
 RULES = SuppressionRules(
     {
         "temporal/flicker": ["*"],
         "temporal/noise": ["temporal/contrast", "hud/*"],
-        "hud/*/size": ["hud/*/text", "hud/*/position"],
+        "hud/#/size": ["hud/#/text", "hud/#/position"],
+        "hud/#/position": ["hud/#/text"],
     }
 )
 
 
 class TestSuppressionRules:
-    def test_wildcard_suppresses_everything_else(self):
+    def test_star_suppresses_everything_else(self):
         active = {"temporal/flicker", "temporal/noise", "hud/cam01/text"}
         assert RULES.suppressed("temporal/noise", active)
         assert RULES.suppressed("hud/cam01/text", active)
         assert not RULES.suppressed("temporal/flicker", active)
 
-    def test_prefix_wildcard(self):
+    def test_prefix_star_matches_any_hud(self):
         active = {"temporal/noise", "hud/cam01/blink"}
         assert RULES.suppressed("hud/cam01/blink", active)
+        assert RULES.suppressed("hud/alert/new", active)
 
-    def test_capture_must_match_same_element(self):
+    def test_hash_binds_same_element_only(self):
         active = {"hud/cam01/size", "hud/rec/text"}
         assert not RULES.suppressed("hud/rec/text", active)
         assert RULES.suppressed("hud/cam01/text", {"hud/cam01/size", "hud/cam01/text"})
+        assert RULES.suppressed(
+            "hud/cam01/position", {"hud/cam01/size", "hud/cam01/position"}
+        )
+
+    def test_star_does_not_bind_across_elements(self):
+        """``*`` matches freely — size on cam suppresses text on *any* element."""
+        any_element = SuppressionRules({"hud/*/size": ["hud/*/text"]})
+        assert any_element.suppressed("hud/rec/text", {"hud/cam01/size"})
+
+    def test_parallel_hud_changes_are_not_cross_suppressed(self):
+        """Size on one element must not hide text/position on another."""
+        active = {"hud/cam01/size", "hud/temp22/text", "hud/temp22/position"}
+        assert not RULES.suppressed("hud/temp22/text", {"hud/cam01/size", "hud/temp22/text"})
+        assert not RULES.suppressed(
+            "hud/temp22/position", {"hud/cam01/size", "hud/temp22/position"}
+        )
+        # Same-element position still suppresses that element's text.
+        assert RULES.suppressed(
+            "hud/temp22/text", {"hud/temp22/position", "hud/temp22/text"}
+        )
+        assert RULES.suppressed("hud/cam01/text", active | {"hud/cam01/text"})
 
     def test_nothing_suppressed_without_suppressor(self):
         assert not RULES.suppressed("hud/cam01/text", {"hud/cam01/text"})
@@ -113,6 +137,51 @@ class TestEventAggregator:
             )
         closed = agg.flush()
         assert [e.anomaly_id for e in closed] == ["primary"]
+
+    def test_parallel_hud_anomalies_create_separate_events(self):
+        agg = make_aggregator(
+            suppresses={
+                "hud/#/size": ["hud/#/text", "hud/#/position"],
+                "hud/#/position": ["hud/#/text"],
+            }
+        )
+        closed = []
+        for i in range(40):
+            t = i * 0.1
+            above = 5.0 if 1.0 <= t <= 3.0 else 0.0
+            _, c, _ = agg.update(
+                t,
+                {
+                    "hud/cam01/text": Reading(above, 1.0, "hud"),
+                    "hud/temp22/position": Reading(above, 1.0, "hud"),
+                },
+            )
+            closed.extend(c)
+        closed.extend(agg.flush())
+        by_id = {e.anomaly_id: e for e in closed}
+        assert set(by_id) == {"hud/cam01/text", "hud/temp22/position"}
+        assert by_id["hud/cam01/text"].duration == pytest.approx(2.0)
+        assert by_id["hud/temp22/position"].duration == pytest.approx(2.0)
+
+    def test_same_element_size_still_suppresses_its_text(self):
+        agg = make_aggregator(
+            suppresses={"hud/#/size": ["hud/#/text", "hud/#/position"]}
+        )
+        closed = []
+        for i in range(40):
+            t = i * 0.1
+            above = 5.0 if 1.0 <= t <= 3.0 else 0.0
+            _, c, _ = agg.update(
+                t,
+                {
+                    "hud/cam01/size": Reading(above, 1.0, "hud"),
+                    "hud/cam01/text": Reading(above, 1.0, "hud"),
+                    "hud/temp22/text": Reading(above, 1.0, "hud"),
+                },
+            )
+            closed.extend(c)
+        closed.extend(agg.flush())
+        assert {e.anomaly_id for e in closed} == {"hud/cam01/size", "hud/temp22/text"}
 
     def test_timeline_is_capped(self):
         agg = make_aggregator(max_timeline_points=50)

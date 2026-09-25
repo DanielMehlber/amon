@@ -21,7 +21,7 @@ from amon.textocr import resolve_glyph_font
 
 WIDTH, HEIGHT = 320, 240
 FPS = 20.0
-DURATION = 86.0
+DURATION = 94.0
 
 #: Infrared landscape photograph shipped next to this module (package data).
 BACKGROUND_IMAGE = Path(__file__).resolve().with_name("infrared-landscape.png")
@@ -45,10 +45,13 @@ SCHEDULE: List[Tuple[str, float, float]] = [
     ("hud_new", 69.0, 71.0),
     ("spatial", 72.0, 75.0),
     ("overlap_flicker_noise", 79.0, 82.0),
+    # After flicker linger (~2.5s): parallel changes on different HUD elements.
+    ("hud_parallel_text", 87.0, 90.0),
+    ("hud_parallel_position", 87.0, 90.0),
 ]
 
-#: Anomaly ID patterns (``*`` = any element) the default detector set is
-#: expected to report per schedule entry.
+#: Anomaly ID patterns the default detector set is expected to report per
+#: schedule entry.  ``*`` matches any path span (see :mod:`amon.aggregate`).
 EXPECTED_EVENTS = {
     "noise": "temporal/noise",
     "flicker": "temporal/flicker",
@@ -58,9 +61,16 @@ EXPECTED_EVENTS = {
     "hud_blink_stop": "hud/*/blink",
     "hud_position": "hud/*/position",
     "hud_size": "hud/*/size",
-    "hud_new": "hud/new",
+    "hud_new": "hud/*/new",
     "spatial": "spatial/distortion",
     "overlap_flicker_noise": "temporal/flicker",
+    "hud_parallel_text": "hud/*/text",
+    "hud_parallel_position": "hud/*/position",
+}
+
+#: How many distinct events are expected for a schedule key (default 1).
+EXPECTED_EVENT_COUNTS = {
+    "hud_new": 2,  # ALERT + WARN appear together → two hud/<slug>/new events
 }
 
 #: Rotation centre for the spatial anomaly — over the bright tree canopy.
@@ -86,8 +96,11 @@ HUD_SPECS: Tuple[HudSpec, ...] = (
     HudSpec("stat", "STAT01", (14, 220), 0.85, 0.0),
 )
 
-#: Overlay that appears only during the ``hud_new`` schedule window.
-NEW_HUD = HudSpec("alert", "ALERT", (200, 220), 1.0, 0.0)
+#: Overlays that appear only during the ``hud_new`` schedule window.
+NEW_HUDS: Tuple[HudSpec, ...] = (
+    HudSpec("alert", "ALERT", (200, 220), 1.0, 0.0),
+    HudSpec("warn", "WARN", (200, 120), 1.0, 0.0),
+)
 
 
 class SyntheticVideo:
@@ -141,12 +154,16 @@ class SyntheticVideo:
         img[:] = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
 
     def _hud_text(self, spec: HudSpec, active: Set[str]) -> str:
-        if spec.key == "cam" and "hud_text" in active:
+        if spec.key == "cam" and (
+            "hud_text" in active or "hud_parallel_text" in active
+        ):
             return "ERR42"
         return spec.text
 
     def _hud_org(self, spec: HudSpec, active: Set[str]) -> Tuple[int, int]:
         if spec.key == "cam" and "hud_position" in active:
+            return spec.org[0] + 14, spec.org[1] + 10
+        if spec.key == "temp" and "hud_parallel_position" in active:
             return spec.org[0] + 14, spec.org[1] + 10
         return spec.org
 
@@ -193,7 +210,8 @@ class SyntheticVideo:
                 )
 
         if "hud_new" in active:
-            self._draw_text(img, NEW_HUD.text, NEW_HUD.org, NEW_HUD.scale)
+            for spec in NEW_HUDS:
+                self._draw_text(img, spec.text, spec.org, spec.scale)
 
         if "contrast" in active:
             mean = img.mean()

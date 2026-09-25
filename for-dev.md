@@ -135,8 +135,9 @@ rate. Detection re-locates each element inside a search window around its
 calibrated box and emits four intensities: normalised Levenshtein text
 distance, centroid shift (px), relative box-area change, and toggle-rate
 deviation over a sliding window (covers frequency change and blink
-start/stop with a single metric). A fifth channel ``hud/new`` fires when
-readable text appears outside every calibrated element's search window.
+start/stop with a single metric). Unexpected overlays each get a channel
+``hud/<slug>/new`` (one event per appearing element) when readable text
+appears outside every calibrated element's search window.
 
 ### Spatial detector (`detectors/spatial.py`)
 
@@ -166,13 +167,13 @@ Per-run diagnostic logs go to `logging.dir` / `<session_id>.log` (default
 `--log-level DEBUG`) to record aggregation decisions (OPEN / CLOSE /
 DISCARD / SUPPRESSED) — useful on field machines without a debugger.
 
-The `suppresses` config maps suppressor patterns to target patterns
-(`*` matches greedily across path segments). While a suppressor anomaly is
-raw-active - and for `suppression_linger_seconds` after a *sustained*
-suppressor subsides, giving windowed metrics time to drain - matching
-targets cannot open events. When suppressor and target patterns have the
-same wildcard count, captures carry over (`hud/*/size` only suppresses
-`hud/*/position` of the same element).
+The `suppresses` config maps suppressor patterns to target patterns.
+``*`` matches any path span with no capture binding; ``#`` matches one
+segment and binds across suppressor/target when both sides use the same
+``#`` count (`hud/#/size` only suppresses `hud/#/text` of that element).
+While a suppressor is raw-active - and for `suppression_linger_seconds`
+after a *sustained* suppressor subsides, giving windowed metrics time to
+drain - matching targets cannot open events.
 
 ## Persistence
 

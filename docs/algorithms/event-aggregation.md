@@ -34,10 +34,16 @@ Without rules, operators see duplicate alarms for the same underlying fault.
 Configuration maps a **suppressor** pattern to **target** patterns. While
 a suppressor is active, matching targets cannot **open** new events.
 
-Patterns look like paths: `temporal/flicker`, `hud/*/text`. A `*` matches
-one or more name segments. When both sides use the same number of `*`
-wildcards, captured names must match — so `hud/*/size` suppresses
-`hud/*/position` only for the **same** element, not every HUD channel.
+Patterns look like paths: `temporal/flicker`, `hud/*/text`, `hud/#/size`.
+
+| Marker | Matches | Binding |
+|---|---|---|
+| `*` | One or more path characters | None — `hud/*/text` is *any* element's text |
+| `#` | One path segment (`[^/]+`) | Same-scope — `hud/#/size` → `hud/#/text` only for that element |
+
+So when two HUD elements change in parallel, size on `cam01` does **not**
+hide text on `temp22`. Use `hud/*` when a global anomaly (noise, flicker)
+should mute every HUD channel.
 
 ## Suppression linger
 

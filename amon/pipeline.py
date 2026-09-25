@@ -191,11 +191,15 @@ class Pipeline:
     ) -> None:
         readings: Dict[str, Reading] = {}
         for detector in self.detectors:
+            # Process first so detectors can register dynamic channels
+            # (e.g. hud/<slug>/new) into their threshold map.
+            intensities = detector.process(frame)
             calibrated = detector.thresholds()
-            for anomaly_id, intensity in detector.process(frame).items():
+            for anomaly_id, intensity in intensities.items():
                 readings[anomaly_id] = Reading(
                     intensity, calibrated[anomaly_id], detector.name
                 )
+                self._detector_of.setdefault(anomaly_id, detector)
 
         opened, closed, discarded = self.aggregator.update(frame.timestamp, readings)
         if opened or closed or discarded:

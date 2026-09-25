@@ -66,8 +66,10 @@ so brief gaps during a normal blink do not false-trigger.
 search margin. Any later bright blob **outside** that cover that OCR reads
 as non-empty text is an unexpected overlay.
 
-**Anomaly ID:** `hud/new` — intensity equals the number of such regions
-(threshold defaults to `new_floor` ≈ 0.5, so one region is enough).
+**Anomaly ID:** `hud/<slug>/new` — one channel (and one event) per appearing
+overlay. Intensity is `1.0` while that overlay is visible; the threshold
+defaults to `new_floor` ≈ 0.5. The slug is derived from the OCR text
+(e.g. `ALERT` → `hud/alert/new`).
 
 Bright non-text blobs (glare, icons without readable glyphs) are ignored.
 
@@ -76,4 +78,4 @@ Bright non-text blobs (glare, icons without readable glyphs) are ignored.
 Each HUD element gets its own namespace, e.g. `hud/cam01/text`,
 `hud/rec/blink`. Text and position on the same physical label are
 separate channels — operators can see *what* changed. Unexpected overlays
-use the shared channel `hud/new`.
+also use per-element IDs (`hud/alert/new`) rather than a shared bucket.

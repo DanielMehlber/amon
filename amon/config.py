@@ -39,15 +39,15 @@ DEFAULTS: dict = {
         "suppression_linger_seconds": 2.5,
         "max_timeline_points": 2000,
         # Exclusion hierarchy: while a suppressor anomaly is active, matching
-        # anomalies are ignored ('*' matches greedily; when suppressor and
-        # target patterns have the same wildcard count, captures must match,
-        # e.g. "hud/*/size" only suppresses "hud/*/text" of the same element).
+        # anomalies are ignored.  ``*`` matches any path span (no binding);
+        # ``#`` binds the same path segment across suppressor and target
+        # (e.g. ``hud/#/size`` only suppresses ``hud/#/text`` of that element).
         "suppresses": {
             "temporal/flicker": ["*"],
             "temporal/noise": ["temporal/contrast", "hud/*", "spatial/*"],
             "temporal/contrast": ["hud/*", "spatial/*"],
-            "hud/*/size": ["hud/*/text", "hud/*/position"],
-            "hud/*/position": ["hud/*/text"],
+            "hud/#/size": ["hud/#/text", "hud/#/position"],
+            "hud/#/position": ["hud/#/text"],
         },
     },
     "media": {

@@ -12,7 +12,7 @@ import pytest
 
 from amon.aggregate import SuppressionRules
 from amon.db import Database
-from amon.synthetic import EXPECTED_EVENTS, SCHEDULE
+from amon.synthetic import EXPECTED_EVENT_COUNTS, EXPECTED_EVENTS, SCHEDULE
 
 #: Tolerance for event boundaries.  Sliding-window metrics (blink rate)
 #: respond up to one window (2 s) late, plus MAD/cooldown slack.
@@ -37,6 +37,7 @@ class TestEventDetection:
         _, _, events = db_events
         for key, start, end in SCHEDULE:
             pattern = EXPECTED_EVENTS[key]
+            expected = EXPECTED_EVENT_COUNTS.get(key, 1)
             hits = [
                 e
                 for e in events
@@ -45,8 +46,41 @@ class TestEventDetection:
                 and abs(e["end"] - end) <= END_TOLERANCE
             ]
             assert (
-                len(hits) == 1
-            ), f"{key}: expected 1 event matching {pattern}, got {hits}"
+                len(hits) == expected
+            ), f"{key}: expected {expected} event(s) matching {pattern}, got {hits}"
+
+    def test_hud_new_emits_one_event_per_overlay(self, db_events):
+        _, _, events = db_events
+        new_events = [
+            e
+            for e in events
+            if matches(e["anomaly_id"], "hud/*/new")
+            and abs(e["start"] - 69.0) <= START_TOLERANCE
+        ]
+        ids = sorted(e["anomaly_id"] for e in new_events)
+        assert len(ids) == 2
+        assert ids[0] != ids[1]
+        assert all(aid.endswith("/new") for aid in ids)
+
+    def test_parallel_hud_changes_are_differentiated(self, db_events):
+        _, _, events = db_events
+        text_hits = [
+            e
+            for e in events
+            if matches(e["anomaly_id"], "hud/*/text")
+            and abs(e["start"] - 87.0) <= START_TOLERANCE
+        ]
+        position_hits = [
+            e
+            for e in events
+            if matches(e["anomaly_id"], "hud/*/position")
+            and abs(e["start"] - 87.0) <= START_TOLERANCE
+        ]
+        assert len(text_hits) == 1
+        assert len(position_hits) == 1
+        assert text_hits[0]["anomaly_id"].split("/")[1] != position_hits[0][
+            "anomaly_id"
+        ].split("/")[1]
 
     def test_no_unexpected_events(self, db_events):
         _, _, events = db_events
