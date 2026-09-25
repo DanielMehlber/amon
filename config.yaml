@@ -15,11 +15,24 @@ calibration:
 
 detectors:
   - class: amon.detectors.temporal.TemporalDetector
-    config: {}
+    config:
+      # Per-anomaly threshold multipliers (1.2 = must exceed calibrated by 20%).
+      tolerance:
+        noise: 1.2
+        flicker: 1.0
+        contrast: 1.0
   - class: amon.detectors.hud.HudDetector
-    config: {}
+    config:
+      tolerance:
+        text: 1.0
+        position: 1.2
+        size: 1.2
+        blink: 1.0
+        new: 1.0
   - class: amon.detectors.spatial.SpatialDetector
-    config: {}
+    config:
+      tolerance:
+        distortion: 1.2
 
 aggregation:
   cooldown_seconds: 1.0

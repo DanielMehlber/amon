@@ -28,14 +28,27 @@ calibration:
 
 detectors:
   - class: amon.detectors.temporal.TemporalDetector
-    config: {}
+    config:
+      # Per-anomaly threshold multipliers (1.2 = must exceed calibrated by 20%).
+      tolerance:
+        noise: 1.2
+        flicker: 1.0
+        contrast: 1.0
   - class: amon.detectors.hud.HudDetector
     config:
+      tolerance:
+        text: 1.0
+        position: 1.2
+        size: 1.2
+        blink: 1.0
+        new: 1.0
       glyph_font: VCR_OSD_MONO_1.001.ttf   # file under amon/fonts/ (or absolute path)
       # max_glyph_height: 64              # reject oversized bright blobs as letters
       # max_glyph_width: 64
   - class: amon.detectors.spatial.SpatialDetector
-    config: {}
+    config:
+      tolerance:
+        distortion: 1.2
 
 aggregation:
   cooldown_seconds: 1.0

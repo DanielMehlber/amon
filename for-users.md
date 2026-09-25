@@ -77,8 +77,8 @@ important keys:
 |---|---|
 | `video_source.config.path` | The video file to monitor (file source). |
 | `video_source.config.device` | Capture device index or path (stream source). |
-| `video_source.config.processing_fps` | Max FPS delivered to the pipeline (stream). |
-| `video_source.config.realtime` | `true` paces playback like a live stream (file source). |
+| `video_source.config.processing_fps` | Max FPS delivered to the pipeline (stream and file). |
+| `video_source.config.realtime` | `true` paces file playback like a live stream. |
 | `preprocessing.scale` | Scale percent of frame size (aspect preserved). |
 | `preprocessing.rotate` | Clockwise rotation in degrees. |
 | `preprocessing.brightness` | Additive brightness offset `[-255, 255]`. |
@@ -93,8 +93,21 @@ important keys:
 | `logging.dir` | Folder for per-run log files (`logs/<session_id>.log`). |
 | `logging.console` | Also print logs to the terminal (`true`/`false`). |
 
-Detector thresholds are **not** configured - they are learned automatically
-during calibration.
+Detector thresholds are learned automatically during calibration. Each
+detector accepts an optional ``tolerance`` — a float for all of its
+anomalies, or a mapping per anomaly type (trailing ID segment such as
+``noise`` / ``text``, full ID, or ``default``). Example: ``1.2`` requires
+intensity to exceed the calibrated cutoff by 20%:
+
+```yaml
+detectors:
+  - class: amon.detectors.temporal.TemporalDetector
+    config:
+      tolerance:
+        noise: 1.2
+        flicker: 1.0
+        contrast: 1.0
+```
 
 ### Diagnostic logging
 

@@ -51,6 +51,8 @@ class TemporalDetector(Detector):
             "noise_floor": 3.0,  # minimum noise threshold (gray levels)
             "flicker_floor": 5.0,  # minimum flicker threshold (gray levels)
             "contrast_floor": 0.15,  # minimum relative contrast deviation
+            # Per-anomaly threshold multipliers (float also accepted).
+            "tolerance": {"noise": 1.0, "flicker": 1.0, "contrast": 1.0},
         }
 
     def __init__(self, config: dict = None):

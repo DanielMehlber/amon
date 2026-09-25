@@ -44,6 +44,33 @@ class TestVideoFileSource:
             assert frames[1].timestamp == pytest.approx(1 / FPS)
             assert frames[0].image.ndim == 3
 
+    def test_processing_fps_skips_frames(self, synthetic_video):
+        cap = FPS / 2.0
+        with VideoFileSource(
+            {"path": synthetic_video, "processing_fps": cap}
+        ) as source:
+            assert source.file_fps == pytest.approx(FPS)
+            assert source.fps == pytest.approx(cap)
+            interval = 1.0 / source.fps
+            frames = []
+            for frame in source.frames():
+                frames.append(frame)
+                if frame.timestamp >= 1.0:
+                    break
+            # About one second of video at half rate → ~cap frames, not FPS.
+            assert len(frames) == pytest.approx(source.fps, abs=1)
+            gaps = [
+                frames[i + 1].timestamp - frames[i].timestamp
+                for i in range(len(frames) - 1)
+            ]
+            assert gaps
+            assert min(gaps) >= interval - 1e-9
+            assert max(gaps) <= interval + 1.0 / source.file_fps + 1e-9
+
+    def test_processing_fps_must_be_positive(self, synthetic_video):
+        with pytest.raises(SourceError, match="processing_fps"):
+            VideoFileSource({"path": synthetic_video, "processing_fps": 0})
+
 
 def _mock_open_capture(
     capture_cls,

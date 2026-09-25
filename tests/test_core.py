@@ -55,6 +55,11 @@ class TestPlugins:
             }
         )
         assert detector.config["noise_floor"] == 9.0
+        assert detector.config["tolerance"] == {
+            "noise": 1.0,
+            "flicker": 1.0,
+            "contrast": 1.0,
+        }
         assert detector.mode == "calibration"
 
     def test_invalid_paths_raise(self):
@@ -62,6 +67,64 @@ class TestPlugins:
             load_class("NoDots")
         with pytest.raises(ImportError):
             load_class("amon.detectors.temporal.Missing")
+
+
+class TestTolerance:
+    def _calibrate_frames(self):
+        from amon.model import Frame
+
+        rng = np.random.default_rng(0)
+        return [
+            Frame(
+                index=i,
+                timestamp=i / 10.0,
+                image=rng.integers(40, 80, (48, 64, 3), dtype=np.uint8),
+            )
+            for i in range(30)
+        ]
+
+    def test_scalar_tolerance_scales_all_thresholds(self):
+        from amon.detectors.temporal import TemporalDetector
+
+        frames = self._calibrate_frames()
+
+        def calibrated(tolerance) -> dict:
+            detector = TemporalDetector({"tolerance": tolerance})
+            for frame in frames:
+                detector.process(frame)
+            return detector.finish_calibration().thresholds
+
+        base = calibrated(1.0)
+        scaled = calibrated(1.2)
+        assert set(scaled) == set(base)
+        for aid in base:
+            assert scaled[aid] == pytest.approx(base[aid] * 1.2)
+
+    def test_per_anomaly_tolerance_scales_only_named_types(self):
+        from amon.detectors import resolve_tolerance
+        from amon.detectors.temporal import CONTRAST, FLICKER, NOISE, TemporalDetector
+
+        assert resolve_tolerance("temporal/noise", {"noise": 1.5}) == 1.5
+        assert resolve_tolerance("hud/cam01/text", {"text": 1.3}) == 1.3
+        assert resolve_tolerance("temporal/flicker", {"noise": 1.5}) == 1.0
+        assert resolve_tolerance("temporal/flicker", {"default": 1.1}) == 1.1
+
+        frames = self._calibrate_frames()
+        base = TemporalDetector({"tolerance": 1.0})
+        for frame in frames:
+            base.process(frame)
+        base_thr = base.finish_calibration().thresholds
+
+        detector = TemporalDetector(
+            {"tolerance": {"noise": 1.5, "flicker": 1.0, "contrast": 1.1}}
+        )
+        for frame in frames:
+            detector.process(frame)
+        scaled = detector.finish_calibration().thresholds
+
+        assert scaled[NOISE] == pytest.approx(base_thr[NOISE] * 1.5)
+        assert scaled[FLICKER] == pytest.approx(base_thr[FLICKER] * 1.0)
+        assert scaled[CONTRAST] == pytest.approx(base_thr[CONTRAST] * 1.1)
 
 
 class TestTextOcr:

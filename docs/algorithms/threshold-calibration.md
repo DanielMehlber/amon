@@ -23,6 +23,21 @@ Threshold ≈ `median + k × MAD` (with `k` around 8 in this project).
 We also require the threshold to beat `1.5 × max(calibration samples)`
 so even a lucky spike during calibration cannot trigger false alarms later.
 
+An optional **`tolerance`** multiplies the final threshold (default
+`1.0`). It may be a single float for the whole detector, or a mapping
+keyed by anomaly type — the trailing segment of the anomaly ID
+(`noise`, `text`, `distortion`, …), the full ID, or `default`:
+
+```yaml
+tolerance:
+  noise: 1.2      # temporal/noise must exceed calibrated cutoff by 20%
+  flicker: 1.0
+  contrast: 1.0
+```
+
+Useful when legitimate changes (e.g. HUD text edits) still nudge a
+secondary metric like noise.
+
 ## Why this fits anomaly detection
 
 Calibration assumes the first *N* seconds are representative of healthy

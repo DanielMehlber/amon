@@ -89,6 +89,14 @@ class HudDetector(Detector):
             "size_floor": 0.25,  # min relative area change
             "blink_floor": 2.0,  # min toggle-rate deviation (1/s)
             "new_floor": 0.5,  # intensity when unexpected text is present
+            # Per-anomaly threshold multipliers (float also accepted).
+            "tolerance": {
+                "text": 1.0,
+                "position": 1.0,
+                "size": 1.0,
+                "blink": 1.0,
+                "new": 1.0,
+            },
         }
 
     def __init__(self, config: dict = None):

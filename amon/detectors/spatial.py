@@ -50,6 +50,8 @@ class SpatialDetector(Detector):
             "sigma_k": 8.0,
             "floor": 2.5,  # minimum displacement threshold (px)
             "region_size": 28,  # highlight box size around moved points
+            # Per-anomaly threshold multipliers (float also accepted).
+            "tolerance": {"distortion": 1.0},
         }
 
     def __init__(self, config: dict = None):

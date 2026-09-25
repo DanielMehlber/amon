@@ -65,7 +65,9 @@ detectors:
 Implement `fps` and `frames()` (a generator of `Frame` objects), raise
 `SourceError` when the stream cannot be opened. Bundled implementations:
 
-- `VideoFileSource` — pre-recorded files (`amon/sources/file.py`)
+- `VideoFileSource` — pre-recorded files (`amon/sources/file.py`). Optional
+  ``processing_fps`` skips frames so the pipeline never sees more than that
+  many frames per second of video time; ``realtime`` paces wall-clock delivery.
 - `VideoInputStream` — live capture devices such as USB adapters or
   capture cards (`amon/sources/stream.py`).  Prefer numeric ``device``
   indices (portable across Linux/macOS/Windows); OpenCV selects the native
@@ -100,8 +102,11 @@ All detectors collect intensity samples on clean calibration footage and
 derive thresholds as `max(floor, median + k·MAD·1.4826, 1.5·max(samples))`.
 The MAD-based sigma is robust against occasional glitches; the
 `1.5·max` term guarantees clearance above everything seen during
-calibration; the floor encodes the metric's physical scale. No manual
-tuning is required.
+calibration; the floor encodes the metric's physical scale. Config key
+`tolerance` (default `1.0`, or a per-anomaly mapping keyed by trailing
+segment / full ID / `default`) then multiplies calibrated thresholds —
+`noise: 1.2` requires that intensity to exceed the learned cutoff by
+20%. No manual per-metric absolute tuning is required.
 
 ### Temporal detector (`detectors/temporal.py`)
 
