@@ -55,3 +55,11 @@ report:
 
 export:
   format: html
+
+# Diagnostic logging (per-run file under logs/<session_id>.log).
+# Console stays quiet (anomalies only); the file gets the full DEBUG trace.
+logging:
+  console: true
+  console_level: INFO      # DEBUG | INFO | WARNING | ERROR
+  file_level: DEBUG        # set INFO to shrink log files
+  dir: logs

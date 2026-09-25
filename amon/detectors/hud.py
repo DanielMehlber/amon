@@ -1,4 +1,4 @@
-"""HUD anomaly detector: text, position, size and blink changes.
+"""HUD anomaly detector: text, position, size, blink and unexpected overlays.
 
 HUD overlays are assumed to be bright graphics (text, icons) rendered on
 top of the scene - the near-universal convention for status HUDs. During
@@ -25,6 +25,9 @@ calibrated box and four intensities are emitted per element ``<id>``:
   second, measured over a sliding window) from the calibrated rate.  This
   covers frequency changes as well as blink start/stop.
 
+Additionally ``hud/new`` fires when bright text appears outside every
+calibrated element's search window - overlays that were absent during
+calibration.
 """
 
 from __future__ import annotations
@@ -40,6 +43,8 @@ from amon.detectors import Detector
 from amon.model import Box, CalibrationResult, Frame
 from amon.stats import robust_threshold
 from amon.textocr import levenshtein_norm, read_text, slugify
+
+NEW_TEXT = "hud/new"
 
 
 @dataclass
@@ -59,7 +64,7 @@ class CalibratedHudElement:
 
 
 class HudDetector(Detector):
-    """Detects text, position, size and blink anomalies of HUD overlays."""
+    """Detects text, position, size, blink and unexpected HUD overlays."""
 
     name = "hud"
 
@@ -83,6 +88,7 @@ class HudDetector(Detector):
             "position_floor": 6.0,  # min centroid shift (px)
             "size_floor": 0.25,  # min relative area change
             "blink_floor": 2.0,  # min toggle-rate deviation (1/s)
+            "new_floor": 0.5,  # intensity when unexpected text is present
         }
 
     def __init__(self, config: dict = None):
@@ -91,6 +97,8 @@ class HudDetector(Detector):
         self._times: List[float] = []
         self._max_img: Optional[np.ndarray] = None
         self._elements: Dict[str, CalibratedHudElement] = {}
+        self._known_cover: Optional[np.ndarray] = None  # dilated calibrated footprint
+        self._last_new: List[Tuple[Box, str]] = []  # unexpected (box, text)
 
     # --- calibration --------------------------------------------------------
     def _calibrate(self, frame: Frame) -> None:
@@ -126,8 +134,24 @@ class HudDetector(Detector):
                 }
             )
 
+        self._known_cover = self._build_known_cover(union.shape)
+        # Absent during calibration by construction — any later appearance is anomalous.
+        thresholds[NEW_TEXT] = float(self.config["new_floor"])
+
         self._grays, self._times = [], []  # free calibration memory
         return CalibrationResult(thresholds=thresholds, annotations=annotations)
+
+    def _build_known_cover(self, shape: Tuple[int, ...]) -> np.ndarray:
+        """Binary mask of calibrated HUD footprints (box + search margin)."""
+        cover = np.zeros(shape[:2], np.uint8)
+        margin = int(self.config["search_margin"])
+        height, width = shape[:2]
+        for element in self._elements.values():
+            x, y, w, h = element.box
+            x0, y0 = max(0, x - margin), max(0, y - margin)
+            x1, y1 = min(width, x + w + margin), min(height, y + h + margin)
+            cover[y0:y1, x0:x1] = 1
+        return cover
 
     def _find_element_bounding_boxes(self, union: np.ndarray) -> List[Box]:
         """Group the union bright mask into per-element bounding boxes."""
@@ -265,7 +289,30 @@ class HudDetector(Detector):
             out[f"hud/{eid}/size"] = size_change
             out[f"hud/{eid}/blink"] = blink_change
 
+        out[NEW_TEXT] = self._measure_new_text(mask, gray)
         return out
+
+    def _measure_new_text(self, mask: np.ndarray, gray: np.ndarray) -> float:
+        """Intensity for unexpected text outside calibrated HUD footprints."""
+        self._last_new = []
+        if self._known_cover is None:
+            return 0.0
+
+        novel = mask & (self._known_cover == 0)
+        if not novel.any():
+            return 0.0
+
+        found: List[Tuple[Box, str]] = []
+        for box in self._find_element_bounding_boxes(novel):
+            x, y, w, h = box
+            text = self._read_element_text(gray[y : y + h, x : x + w]).strip()
+            if not text:
+                continue  # bright non-text blobs (glare, icons) are ignored
+            found.append((box, text))
+
+        self._last_new = found
+        # One unit of intensity per unexpected text region (threshold ≈ 0.5).
+        return float(len(found))
 
     def _measure_hud_element_changes(
         self,
@@ -346,6 +393,11 @@ class HudDetector(Detector):
 
     # --- event enrichment -------------------------------------------------------
     def metadata(self, anomaly_id: str) -> dict:
+        if anomaly_id == NEW_TEXT:
+            return {
+                "texts": [text for _, text in self._last_new],
+                "count": len(self._last_new),
+            }
         element = self._element_for(anomaly_id)
         if element is None:
             return {}
@@ -357,6 +409,8 @@ class HudDetector(Detector):
         }
 
     def regions(self, anomaly_id: str) -> List[Box]:
+        if anomaly_id == NEW_TEXT:
+            return [box for box, _ in self._last_new]
         element = self._element_for(anomaly_id)
         if element is None:
             return []

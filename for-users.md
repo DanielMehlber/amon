@@ -88,9 +88,34 @@ important keys:
 | `aggregation.suppresses` | The exclusion hierarchy that prevents false positives. |
 | `media.max_clip_seconds` | Evidence clips of long events are cut to this length. |
 | `data_dir` | Where the database, media and exports are stored. |
+| `logging.console_level` | Terminal verbosity (`INFO` = anomalies only). |
+| `logging.file_level` | Per-run file verbosity (`DEBUG` = full detection trace). |
+| `logging.dir` | Folder for per-run log files (`logs/<session_id>.log`). |
+| `logging.console` | Also print logs to the terminal (`true`/`false`). |
 
 Detector thresholds are **not** configured - they are learned automatically
 during calibration.
+
+### Diagnostic logging
+
+Each monitoring run writes a log file named after the session, e.g.
+`logs/Oceanic-Robin.log`. Console and file levels are independent:
+
+```yaml
+logging:
+  console: true
+  console_level: INFO    # OPEN / CLOSE / FINALIZE on the terminal
+  file_level: DEBUG      # intensity-vs-threshold + suppression in the file
+  dir: logs
+```
+
+Overrides: `python -m amon monitor test.yaml --log-level DEBUG` sets the
+**file** level (use `--console-log-level` for the terminal).
+
+At console `INFO` you only see session start/finish, calibration complete, and
+each detected anomaly (`event <id>: start-end (duration, peak)`). File `DEBUG`
+adds thresholds, OPEN/CLOSE/DISCARD, suppression reasons, and per-frame
+intensity-vs-threshold comparisons.
 
 ### Preprocessing
 

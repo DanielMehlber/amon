@@ -72,6 +72,15 @@ DEFAULTS: dict = {
     "export": {
         "format": "html",
     },
+    # Diagnostic logging for field machines (no debugger).
+    # Per-run file: <logging.dir>/<session_id>.log
+    # Console and file levels are independent (logger uses the quieter of the two).
+    "logging": {
+        "console": True,
+        "console_level": "INFO",   # anomalies / session lifecycle on stderr
+        "file_level": "DEBUG",     # full detection trace in the log file
+        "dir": "logs",
+    },
 }
 
 

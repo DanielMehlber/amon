@@ -60,3 +60,9 @@ report:
 
 export:
   format: html
+
+logging:
+  console: true
+  console_level: INFO
+  file_level: DEBUG
+  dir: logs

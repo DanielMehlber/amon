@@ -67,6 +67,14 @@ _PENDING_CSS = f"""
 """
 
 
+def _widget_caption(text: str) -> dict:
+    """Caption kwarg compatible with Panel ``label`` (1.9+) and ``name`` (older)."""
+    # Panel 1.9+ deprecates Widget.name in favour of Widget.label.
+    if "label" in pn.widgets.Widget.param:
+        return {"label": text}
+    return {"name": text}
+
+
 def _session_label(session: dict) -> str:
     status = "" if session["status"] == "completed" else f" [{session['status']}]"
     started = format_wall_time(session["started_at"])
@@ -271,25 +279,27 @@ def events_tab(config: dict, session_id: str, events: list) -> pn.Column:
     max_duration = max([e["duration"] for e in events] + [1.0])
 
     search = pn.widgets.TextInput(
-        name="Search",
+        **_widget_caption("Search"),
         placeholder="Filter by anomaly or detector…",
         sizing_mode="stretch_width",
     )
     type_filter = pn.widgets.MultiChoice(
-        name="Anomaly type",
+        **_widget_caption("Anomaly type"),
         options=types,
         value=[],
         sizing_mode="stretch_width",
     )
     min_duration = pn.widgets.FloatSlider(
-        name="Min duration (s)",
+        **_widget_caption("Min duration (s)"),
         start=0.0,
         end=max_duration,
         step=0.1,
         value=0.0,
     )
     sort_by = pn.widgets.Select(
-        name="Sort by", options=list(SORT_OPTIONS), value="Start time (earliest first)"
+        **_widget_caption("Sort by"),
+        options=list(SORT_OPTIONS),
+        value="Start time (earliest first)",
     )
 
     filters = pn.Row(
@@ -301,7 +311,7 @@ def events_tab(config: dict, session_id: str, events: list) -> pn.Column:
     )
 
     export_button = pn.widgets.Button(
-        name="Export events as CSV", button_type="primary", width=200
+        **_widget_caption("Export events as CSV"), button_type="primary", width=200
     )
     export_status = pn.pane.Markdown("")
 
@@ -385,8 +395,12 @@ def calibration_tab(calibration: dict) -> pn.Column:
 def export_tab(config: dict, session_id: str) -> pn.Column:
     from amon.exporters import EXPORTERS, export_session
 
-    format_select = pn.widgets.Select(name="Format", options=list(EXPORTERS))
-    button = pn.widgets.Button(name="Export report", button_type="primary")
+    format_select = pn.widgets.Select(
+        **_widget_caption("Format"), options=list(EXPORTERS)
+    )
+    button = pn.widgets.Button(
+        **_widget_caption("Export report"), button_type="primary"
+    )
     status = pn.pane.Markdown("")
 
     def run_export(_):
@@ -476,7 +490,7 @@ def build_app(config: dict):
 
     options = {_session_label(s): s["id"] for s in sessions}
     session_select = pn.widgets.Select(
-        name="Monitoring session", options=options, width=400
+        **_widget_caption("Monitoring session"), options=options, width=400
     )
     template.main.append(
         pn.Column(

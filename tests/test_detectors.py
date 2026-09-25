@@ -89,6 +89,7 @@ class TestHudDetector:
 
     def test_anomaly_ids_cover_all_aspects(self, detector):
         thresholds = detector.thresholds()
+        assert "hud/new" in thresholds
         for element_id in detector._elements:
             for aspect in ("text", "position", "size", "blink"):
                 assert f"hud/{element_id}/{aspect}" in thresholds
@@ -142,6 +143,13 @@ class TestHudDetector:
         label = self._label_id(detector)
         peaks = peak_intensities(detector, scene, 65.5, 67.5)
         assert peaks[f"hud/{label}/size"] > detector.thresholds()[f"hud/{label}/size"]
+
+    def test_new_text_detected(self, scene):
+        detector = self._fresh(scene, 66.0)
+        peaks = peak_intensities(detector, scene, 69.2, 70.8)
+        assert peaks["hud/new"] > detector.thresholds()["hud/new"]
+        assert detector.metadata("hud/new")["count"] >= 1
+        assert detector.regions("hud/new")
 
     def test_blink_frequency_change_detected(self, scene):
         detector = self._fresh(scene, 41.0)

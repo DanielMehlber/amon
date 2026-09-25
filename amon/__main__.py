@@ -11,7 +11,6 @@ Commands:
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 
 from amon.config import load_config
@@ -27,6 +26,16 @@ def main(argv=None) -> int:
     p_monitor.add_argument("config", help="path to the YAML configuration file")
     p_monitor.add_argument(
         "--max-frames", type=int, default=None, help="stop after N frames"
+    )
+    p_monitor.add_argument(
+        "--log-level",
+        default=None,
+        help="override logging.file_level (DEBUG, INFO, WARNING, ERROR)",
+    )
+    p_monitor.add_argument(
+        "--console-log-level",
+        default=None,
+        help="override logging.console_level (DEBUG, INFO, WARNING, ERROR)",
     )
 
     p_report = sub.add_parser("report", help="launch the report UI in the browser")
@@ -44,7 +53,6 @@ def main(argv=None) -> int:
     p_synth.add_argument("path", help="output video path (.avi or .mp4)")
 
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
     if args.command == "synth":
         from amon.synthetic import write_video
@@ -53,6 +61,17 @@ def main(argv=None) -> int:
         return 0
 
     config = load_config(args.config)
+    if args.command == "monitor":
+        log_cfg = config.setdefault("logging", {})
+        if getattr(args, "log_level", None):
+            log_cfg["file_level"] = args.log_level
+        if getattr(args, "console_log_level", None):
+            log_cfg["console_level"] = args.console_log_level
+
+    from amon.logging_setup import configure_logging
+
+    configure_logging(config)
+
     if args.command == "monitor":
         return _monitor(config, args.max_frames)
     if args.command == "report":

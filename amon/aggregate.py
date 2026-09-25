@@ -15,11 +15,14 @@ suppresses the position anomaly of the *same* HUD element.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from amon.model import AnomalyEvent
+
+log = logging.getLogger("amon.aggregate")
 
 
 def _compile_regex(pattern: str) -> re.Pattern:
@@ -44,6 +47,12 @@ class SuppressionRules:
 
     def suppressed(self, anomaly_id: str, active: Iterable[str]) -> bool:
         """True if ``anomaly_id`` is suppressed by any *other* active anomaly."""
+        return self.suppressor_of(anomaly_id, active) is not None
+
+    def suppressor_of(
+        self, anomaly_id: str, active: Iterable[str]
+    ) -> Optional[str]:
+        """Return the active anomaly ID that suppresses ``anomaly_id``, if any."""
         for suppressor in active:
             if suppressor == anomaly_id:
                 continue
@@ -55,10 +64,10 @@ class SuppressionRules:
                 for target in targets:
                     if sup_stars and target.count("*") == sup_stars:
                         if _substitute(target, captures) == anomaly_id:
-                            return True
+                            return suppressor
                     elif _compile_regex(target).match(anomaly_id):
-                        return True
-        return False
+                        return suppressor
+        return None
 
 
 @dataclass
@@ -94,6 +103,8 @@ class EventAggregator:
         self._streaks: Dict[str, Tuple[float, float]] = (
             {}
         )  # aid -> (streak start, last raw)
+        # aid -> suppressor id for the current contiguous suppression streak
+        self._suppress_streak: Dict[str, str] = {}
 
     def update(
         self, t: float, readings: Dict[str, Reading]
@@ -117,7 +128,64 @@ class EventAggregator:
         for aid, (start, last) in self._streaks.items():
             if last - start >= self.min_duration and t - last <= self.linger:
                 suppressors.add(aid)
-        firing = {aid for aid in raw if not self.rules.suppressed(aid, suppressors)}
+
+        firing: set = set()
+        currently_suppressed: set = set()
+        for aid in raw:
+            blocker = self.rules.suppressor_of(aid, suppressors)
+            reading = readings[aid]
+            if blocker is not None:
+                currently_suppressed.add(aid)
+                detail = (
+                    "t=%.3fs SUPPRESSED %s: intensity=%.4f >= threshold=%.4f "
+                    "(detector=%s) blocked by suppressor %s "
+                    "(raw_above_threshold=%s linger_eligible=%s)"
+                    % (
+                        t,
+                        aid,
+                        reading.intensity,
+                        reading.threshold,
+                        reading.detector,
+                        blocker,
+                        sorted(raw),
+                        sorted(suppressors - raw),
+                    )
+                )
+                if self._suppress_streak.get(aid) != blocker:
+                    log.debug(
+                        "%s — event will NOT open/continue while this suppressor is active",
+                        detail,
+                    )
+                    self._suppress_streak[aid] = blocker
+                else:
+                    log.debug("%s", detail)
+            else:
+                firing.add(aid)
+
+        for aid in list(self._suppress_streak):
+            if aid not in currently_suppressed:
+                log.debug(
+                    "t=%.3fs SUPPRESSION_END %s: no longer blocked (was suppressed by %s)",
+                    t,
+                    aid,
+                    self._suppress_streak.pop(aid),
+                )
+
+        for aid, reading in readings.items():
+            if aid in raw:
+                continue
+            margin = reading.threshold - reading.intensity
+            log.debug(
+                "t=%.3fs BELOW_THRESHOLD %s: intensity=%.4f < threshold=%.4f "
+                "(shortfall=%.4f, detector=%s, event_open=%s)",
+                t,
+                aid,
+                reading.intensity,
+                reading.threshold,
+                margin,
+                reading.detector,
+                aid in self._open,
+            )
 
         opened: List[str] = []
         closed: List[AnomalyEvent] = []
@@ -139,6 +207,28 @@ class EventAggregator:
                     )
                     self._open[aid] = state
                     opened.append(aid)
+                    log.debug(
+                        "t=%.3fs OPEN %s: intensity=%.4f >= threshold=%.4f "
+                        "(detector=%s) — event started; will stay open until "
+                        "intensity stays below threshold for cooldown=%.2fs",
+                        t,
+                        aid,
+                        reading.intensity,
+                        reading.threshold,
+                        reading.detector,
+                        self.cooldown,
+                    )
+                else:
+                    log.debug(
+                        "t=%.3fs CONTINUE %s: intensity=%.4f >= threshold=%.4f "
+                        "(open since %.3fs, peak_so_far=%.4f)",
+                        t,
+                        aid,
+                        reading.intensity,
+                        reading.threshold,
+                        state.event.start,
+                        state.event.max_intensity,
+                    )
                 state.last_above = t
                 state.event.max_intensity = max(
                     state.event.max_intensity, reading.intensity
@@ -146,9 +236,53 @@ class EventAggregator:
                 self._append_point(state, t, reading.intensity)
             elif state is not None:
                 self._append_point(state, t, reading.intensity)
-                if t - state.last_above >= self.cooldown:
+                below_for = t - state.last_above
+                if below_for >= self.cooldown:
+                    duration_so_far = state.last_above - state.event.start
                     event = self._close(aid)
-                    closed.append(event) if event else discarded.append(aid)
+                    if event:
+                        closed.append(event)
+                        log.debug(
+                            "t=%.3fs CLOSE %s: was above threshold from %.3fs to "
+                            "%.3fs (duration=%.3fs, peak=%.4f, threshold=%.4f); "
+                            "closed after %.3fs below threshold (cooldown=%.2fs)",
+                            t,
+                            aid,
+                            event.start,
+                            event.end,
+                            event.duration,
+                            event.max_intensity,
+                            event.threshold,
+                            below_for,
+                            self.cooldown,
+                        )
+                    else:
+                        discarded.append(aid)
+                        log.debug(
+                            "t=%.3fs DISCARD %s: was above threshold from %.3fs to "
+                            "%.3fs (duration=%.3fs) but shorter than "
+                            "min_duration_seconds=%.2fs — treated as glitch, "
+                            "not written as an anomaly event",
+                            t,
+                            aid,
+                            state.event.start,
+                            state.last_above,
+                            duration_so_far,
+                            self.min_duration,
+                        )
+                else:
+                    log.debug(
+                        "t=%.3fs COOLDOWN %s: intensity=%.4f < threshold=%.4f "
+                        "but only %.3fs below so far (need cooldown=%.2fs); "
+                        "event still open since %.3fs",
+                        t,
+                        aid,
+                        reading.intensity,
+                        reading.threshold,
+                        below_for,
+                        self.cooldown,
+                        state.event.start,
+                    )
         return opened, closed, discarded
 
     def peek_open(self) -> Dict[str, AnomalyEvent]:
@@ -171,8 +305,34 @@ class EventAggregator:
 
     def flush(self) -> List[AnomalyEvent]:
         """Close all events that are still open (called at stream end)."""
-        closed = [self._close(aid) for aid in list(self._open)]
-        return [event for event in closed if event]
+        still_open = list(self._open)
+        if still_open:
+            log.debug(
+                "flush: closing %d still-open event(s) at stream end: %s",
+                len(still_open),
+                still_open,
+            )
+        closed = []
+        for aid in still_open:
+            event = self._close(aid)
+            if event:
+                closed.append(event)
+                log.debug(
+                    "flush CLOSE %s: %.3fs-%.3fs (duration=%.3fs, peak=%.4f)",
+                    aid,
+                    event.start,
+                    event.end,
+                    event.duration,
+                    event.max_intensity,
+                )
+            else:
+                log.debug(
+                    "flush DISCARD %s: open at stream end but duration shorter "
+                    "than min_duration_seconds=%.2fs",
+                    aid,
+                    self.min_duration,
+                )
+        return closed
 
     def _close(self, aid: str) -> Optional[AnomalyEvent]:
         state = self._open.pop(aid)

@@ -150,8 +150,10 @@ class TestOfflinePanel:
             assert "jsdelivr" not in url
 
     def test_served_html_has_no_jsdelivr(self, session_data, monkeypatch):
+        import socket
         import threading
         import time
+        import urllib.error
         import urllib.request
 
         import panel as pn
@@ -160,9 +162,20 @@ class TestOfflinePanel:
         from amon.report import build_app
 
         monkeypatch.setenv("BOKEH_RESOURCES", "cdn")
+        # Proxies on isolated machines often return HTTP 403 for urllib→localhost.
+        monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+        monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
+        monkeypatch.delenv("HTTP_PROXY", raising=False)
+        monkeypatch.delenv("HTTPS_PROXY", raising=False)
+        monkeypatch.delenv("http_proxy", raising=False)
+        monkeypatch.delenv("https_proxy", raising=False)
+
         config, _, _ = session_data
-        port = 5094
-        address = config["report"].get("address", "127.0.0.1")
+        address = "127.0.0.1"
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((address, 0))
+            port = sock.getsockname()[1]
+
         threading.Thread(
             target=lambda: pn.serve(
                 lambda: build_app(config),
@@ -170,14 +183,31 @@ class TestOfflinePanel:
                 show=False,
                 threaded=True,
                 address=address,
-                websocket_origin=websocket_origins(
-                    address, port, config["report"].get("websocket_origin")
-                ),
+                websocket_origin=websocket_origins(address, port),
             ),
             daemon=True,
         ).start()
-        time.sleep(4)
-        html = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
+
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        request = urllib.request.Request(
+            f"http://{address}:{port}/",
+            headers={
+                "User-Agent": "amon-tests/1.0",
+                "Accept": "text/html",
+            },
+        )
+        html = None
+        last_error = None
+        for _ in range(40):
+            try:
+                with opener.open(request, timeout=2) as response:
+                    html = response.read().decode()
+                break
+            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+                last_error = exc
+                time.sleep(0.25)
+        assert html is not None, f"report server did not become ready: {last_error}"
+
         assert_offline_html(html)
         assert "jsdelivr" not in html
         assert "googleapis" not in html

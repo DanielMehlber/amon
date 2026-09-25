@@ -60,8 +60,20 @@ times per second.
 The detector waits until the sliding window is full before judging blink,
 so brief gaps during a normal blink do not false-trigger.
 
+## Unexpected / new text
+
+**Idea:** Calibration records a *known cover* — each element’s box plus the
+search margin. Any later bright blob **outside** that cover that OCR reads
+as non-empty text is an unexpected overlay.
+
+**Anomaly ID:** `hud/new` — intensity equals the number of such regions
+(threshold defaults to `new_floor` ≈ 0.5, so one region is enough).
+
+Bright non-text blobs (glare, icons without readable glyphs) are ignored.
+
 ## Per-element anomaly IDs
 
 Each HUD element gets its own namespace, e.g. `hud/cam01/text`,
 `hud/rec/blink`. Text and position on the same physical label are
-separate channels — operators can see *what* changed.
+separate channels — operators can see *what* changed. Unexpected overlays
+use the shared channel `hud/new`.

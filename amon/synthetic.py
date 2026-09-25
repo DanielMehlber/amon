@@ -42,6 +42,7 @@ SCHEDULE: List[Tuple[str, float, float]] = [
     ("hud_blink_stop", 51.0, 54.0),
     ("hud_position", 58.0, 61.0),
     ("hud_size", 65.0, 68.0),
+    ("hud_new", 69.0, 71.0),
     ("spatial", 72.0, 75.0),
     ("overlap_flicker_noise", 79.0, 82.0),
 ]
@@ -57,6 +58,7 @@ EXPECTED_EVENTS = {
     "hud_blink_stop": "hud/*/blink",
     "hud_position": "hud/*/position",
     "hud_size": "hud/*/size",
+    "hud_new": "hud/new",
     "spatial": "spatial/distortion",
     "overlap_flicker_noise": "temporal/flicker",
 }
@@ -83,6 +85,9 @@ HUD_SPECS: Tuple[HudSpec, ...] = (
     HudSpec("temp", "TEMP22", (118, 28), 0.9, 1.0),
     HudSpec("stat", "STAT01", (14, 220), 0.85, 0.0),
 )
+
+#: Overlay that appears only during the ``hud_new`` schedule window.
+NEW_HUD = HudSpec("alert", "ALERT", (200, 220), 1.0, 0.0)
 
 
 class SyntheticVideo:
@@ -186,6 +191,9 @@ class SyntheticVideo:
                     self._hud_org(spec, active),
                     self._hud_scale(spec, active),
                 )
+
+        if "hud_new" in active:
+            self._draw_text(img, NEW_HUD.text, NEW_HUD.org, NEW_HUD.scale)
 
         if "contrast" in active:
             mean = img.mean()

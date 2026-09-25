@@ -32,6 +32,7 @@ import numpy as np
 from amon.aggregate import EventAggregator, Reading
 from amon.db import Database
 from amon.detectors import Detector
+from amon.logging_setup import attach_session_log
 from amon.model import AnomalyEvent, Frame
 from amon.names import generate_session_id
 from amon.plugins import instantiate
@@ -105,6 +106,7 @@ class Pipeline:
         )
         db.close()
 
+        log_path = attach_session_log(self.config, self.session_id)
         worker = self._worker or BackgroundWorker(
             self.db_path, self.media_dir, self.session_id, self.config["media"]
         )
@@ -113,6 +115,13 @@ class Pipeline:
             "session %s started (calibrating for %.1fs)",
             self.session_id,
             calibration_end,
+        )
+        log.debug(
+            "session %s details: fps=%.3f source=%s log_file=%s",
+            self.session_id,
+            fps,
+            source_label(self.config["video_source"]),
+            log_path,
         )
 
         calibrated = False
@@ -162,6 +171,19 @@ class Pipeline:
         clip = [(t, img) for t, img in ring][-int(CALIBRATION_CLIP_SECONDS * fps) :]
         worker.submit_calibration(thresholds, annotations, clip, fps)
         log.info("calibration complete: %d anomalies armed", len(self._detector_of))
+        for detector in self.detectors:
+            for anomaly_id, value in sorted(detector.thresholds().items()):
+                log.debug(
+                    "calibrated threshold %s = %.6f (detector=%s)",
+                    anomaly_id,
+                    value,
+                    detector.name,
+                )
+        for key, items in annotations.items():
+            if isinstance(items, list):
+                log.debug("calibration annotation %s: %d item(s)", key, len(items))
+            else:
+                log.debug("calibration annotation %s: %r", key, type(items).__name__)
 
     # --- monitoring ------------------------------------------------------------
     def _monitor_frame(
@@ -176,10 +198,33 @@ class Pipeline:
                 )
 
         opened, closed, discarded = self.aggregator.update(frame.timestamp, readings)
+        if log.isEnabledFor(logging.DEBUG):
+            above = [
+                f"{aid}={readings[aid].intensity:.4f}>={readings[aid].threshold:.4f}"
+                for aid in sorted(readings)
+                if readings[aid].intensity >= readings[aid].threshold
+            ]
+            log.debug(
+                "t=%.3fs frame=%d readings=%d above_threshold=[%s] opened=%s "
+                "closed=%s discarded=%s",
+                frame.timestamp,
+                frame.index,
+                len(readings),
+                ", ".join(above) or "none",
+                opened,
+                [event.anomaly_id for event in closed],
+                discarded,
+            )
+
         for anomaly_id in discarded:  # too short to report - free capture state
             self._clips.pop(anomaly_id, None)
             self._enrichment.pop(anomaly_id, None)
             worker.submit_discard(anomaly_id)
+            log.debug(
+                "t=%.3fs discarded ongoing DB row for %s (failed min_duration)",
+                frame.timestamp,
+                anomaly_id,
+            )
 
         for anomaly_id in opened:
             detector = self._detector_of[anomaly_id]
@@ -235,4 +280,12 @@ class Pipeline:
             event.end,
             event.duration,
             event.max_intensity,
+        )
+        log.debug(
+            "event %s details: threshold=%.4f clip_frames=%d metadata_keys=%s regions=%d",
+            event.anomaly_id,
+            event.threshold,
+            len(clip),
+            sorted(metadata.keys()),
+            len(regions),
         )
