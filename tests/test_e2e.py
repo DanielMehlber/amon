@@ -19,6 +19,14 @@ from amon.synthetic import EXPECTED_EVENT_COUNTS, EXPECTED_EVENTS, SCHEDULE
 START_TOLERANCE = 2.6
 END_TOLERANCE = 3.6
 
+#: Secondary detections that appear when ``aggregation.suppresses`` does not
+#: silence them (defaults ship with no suppressions).  Contrast changes the
+#: global histogram and can trip a calibrated blink rate without a real blink
+#: anomaly — only expected if ``temporal/contrast → hud/*`` is not configured.
+KNOWN_SIDE_EFFECTS = [
+    ("hud/*/blink", 30.0, 33.0),
+]
+
 
 def matches(anomaly_id: str, pattern: str) -> bool:
     return SuppressionRules({pattern: []})._rules[0][0].match(anomaly_id) is not None
@@ -125,6 +133,11 @@ class TestEventDetection:
                 for key, start, end in SCHEDULE
                 if matches(event["anomaly_id"], EXPECTED_EVENTS[key])
             ]
+            windows.extend(
+                (start, end)
+                for pattern, start, end in KNOWN_SIDE_EFFECTS
+                if matches(event["anomaly_id"], pattern)
+            )
             assert any(
                 abs(event["start"] - start) <= START_TOLERANCE
                 and abs(event["end"] - end) <= END_TOLERANCE

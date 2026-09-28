@@ -33,6 +33,22 @@ class TestConfig:
         assert config["calibration"]["duration_seconds"] == 3.0
         assert config["media"]["lead_seconds"] == DEFAULTS["media"]["lead_seconds"]
 
+    def test_no_default_suppressions(self):
+        assert DEFAULTS["aggregation"]["suppresses"] == {}
+        config = merge_defaults({})
+        assert config["aggregation"]["suppresses"] == {}
+
+    def test_suppressions_must_be_listed_explicitly(self):
+        config = merge_defaults(
+            {
+                "aggregation": {
+                    "suppresses": {"temporal/flicker": ["*"]},
+                }
+            }
+        )
+        assert config["aggregation"]["suppresses"] == {"temporal/flicker": ["*"]}
+        assert "temporal/contrast" not in config["aggregation"]["suppresses"]
+
     def test_load_config(self, tmp_path):
         path = tmp_path / "c.yaml"
         path.write_text("session_name: abc\nmedia:\n  gif_max_fps: 5\n")

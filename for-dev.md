@@ -174,6 +174,8 @@ the disk. Use `file_level: DEBUG` (or `--log-level DEBUG`) to record
 aggregation decisions (OPEN / CLOSE / DISCARD / SUPPRESSED).
 
 The `suppresses` config maps suppressor patterns to target patterns.
+Defaults are **empty**: every rule must be listed in the session YAML
+(deep-merge would otherwise keep omitted default keys forever).
 ``*`` matches any path span with no capture binding; ``#`` matches one
 segment and binds across suppressor/target when both sides use the same
 ``#`` count (`hud/#/size` only suppresses `hud/#/text` of that element).

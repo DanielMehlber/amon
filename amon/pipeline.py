@@ -275,11 +275,13 @@ class Pipeline:
                 and frame.timestamp - clip[-1][0] >= self._clip_interval - 1e-9
             ):
                 clip.append((frame.timestamp, frame.image))
+                # Always record the latest known box (refresh keeps last-known
+                # across blink/OCR gaps) so the GIF can mark the overlay for
+                # the full evidence window, not only while intensity is high.
                 _, boxes = self._enrichment.get(anomaly_id, ({}, []))
-                if boxes:
-                    self._region_timelines.setdefault(anomaly_id, []).append(
-                        (frame.timestamp, list(boxes))
-                    )
+                self._region_timelines.setdefault(anomaly_id, []).append(
+                    (frame.timestamp, list(boxes))
+                )
 
         for event in closed:
             self._finalize_event(event, worker, fps)

@@ -37,10 +37,10 @@ detectors:
 aggregation:
   cooldown_seconds: 1.0
   min_duration_seconds: 0.5
+  # Same explicit hierarchy as test.yaml (no built-in default rules).
   suppresses:
     temporal/flicker: ["*"]
-    temporal/noise: ["temporal/contrast", "hud/*", "spatial/*"]
-    temporal/contrast: ["hud/*", "spatial/*"]
+    temporal/noise: ["temporal/contrast"]
     hud/#/size: ["hud/#/text", "hud/#/position"]
     hud/#/position: ["hud/#/text"]
 

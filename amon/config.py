@@ -38,17 +38,9 @@ DEFAULTS: dict = {
         # windowed metrics can drain a primary anomaly's side-effects.
         "suppression_linger_seconds": 2.5,
         "max_timeline_points": 2000,
-        # Exclusion hierarchy: while a suppressor anomaly is active, matching
-        # anomalies are ignored.  ``*`` matches any path span (no binding);
-        # ``#`` binds the same path segment across suppressor and target
-        # (e.g. ``hud/#/size`` only suppresses ``hud/#/text`` of that element).
-        "suppresses": {
-            "temporal/flicker": ["*"],
-            "temporal/noise": ["temporal/contrast", "hud/*", "spatial/*"],
-            "temporal/contrast": ["hud/*", "spatial/*"],
-            "hud/#/size": ["hud/#/text", "hud/#/position"],
-            "hud/#/position": ["hud/#/text"],
-        },
+        # No default exclusion rules — every suppression must be listed in the
+        # session YAML (deep-merge would otherwise keep stale default keys).
+        "suppresses": {},
     },
     "media": {
         "max_clip_seconds": 6.0,  # long events are clipped to this length

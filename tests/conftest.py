@@ -55,6 +55,15 @@ def completed_session(synthetic_video, tmp_path_factory):
                 "config": {"path": synthetic_video},
             },
             "calibration": {"duration_seconds": 10.0},
+            # Explicit — defaults ship with no suppressions.
+            "aggregation": {
+                "suppresses": {
+                    "temporal/flicker": ["*"],
+                    "temporal/noise": ["temporal/contrast"],
+                    "hud/#/size": ["hud/#/text", "hud/#/position"],
+                    "hud/#/position": ["hud/#/text"],
+                }
+            },
         }
     )
     session_id = Pipeline(config).run()

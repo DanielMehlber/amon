@@ -55,6 +55,7 @@ aggregation:
   min_duration_seconds: 0.5
   # Exclusion hierarchy: primary anomalies suppress their side-effects.
   # '*' = any matching path (no element binding); '#' = same HUD element.
+  # No rules are built-in — list every suppression you want here.
   suppresses:
     temporal/flicker: ["*"]
     temporal/noise: ["temporal/contrast"]

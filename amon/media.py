@@ -69,21 +69,32 @@ def write_event_gif(
 ) -> str:
     """Render an event evidence GIF, highlighting affected regions.
 
-    When ``region_timeline`` is provided (timestamp → boxes), each frame uses
-    the latest marker for that time so overlays that rewrite glyphs or resize
-    stay highlighted.  Otherwise ``event.regions`` is drawn on every frame.
+    When ``region_timeline`` is provided, each frame uses the latest known
+    box at that time and **keeps** drawing it for the rest of the clip —
+    including after ``event.end``.  That way a ``hud/*/new`` overlay that
+    rewrites its glyphs (or briefly drops out of detection) stays marked
+    for as long as evidence frames were captured, not only during the
+    aggregator's open window.
+
+    Without a timeline, ``event.regions`` is drawn for
+    ``event.start`` … ``event.end`` as before.
     """
     selected = subsample(frames, fps, gif_fps)
     timeline = list(region_timeline or [])
     rendered = []
     for t, image in selected:
         canvas = image.copy()
-        if event.start <= t <= event.end:
-            boxes = (
-                regions_at(timeline, t, event.regions)
-                if timeline
-                else event.regions
-            )
+        if timeline:
+            # Carry the last non-empty box forward through the whole clip so
+            # the marker survives content changes and short detection gaps.
+            boxes = regions_at(timeline, t, ())
+            if not boxes and t >= event.start:
+                boxes = [tuple(box) for box in (event.regions or [])]  # type: ignore[misc]
+        elif event.start <= t <= event.end:
+            boxes = list(event.regions or [])
+        else:
+            boxes = []
+        if boxes:
             for box in boxes:
                 _draw_box(canvas, box, HIGHLIGHT)
             cv2.putText(

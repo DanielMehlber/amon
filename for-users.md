@@ -87,7 +87,7 @@ important keys:
 | `preprocessing.contrast` | Contrast gain (`1.0` = unchanged). |
 | `calibration.duration_seconds` | Length of the automatic calibration phase. |
 | `detectors` | Which detector plugins to load and their settings. |
-| `aggregation.suppresses` | The exclusion hierarchy that prevents false positives. |
+| `aggregation.suppresses` | Exclusion hierarchy (empty by default — list every rule you want). |
 | `media.max_clip_seconds` | Evidence clips of long events are cut to this length. |
 | `media.queue_maxsize` | Max pending background jobs (GIF/DB). Default 8; protects RAM if the worker stalls. |
 | `data_dir` | Where the database, media and exports are stored. |
