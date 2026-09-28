@@ -133,8 +133,10 @@ offline glyph matcher in `textocr.py`, Otsu-binarised, matched against
 TrueType templates (default: bundled VCR OSD Mono under `amon/fonts/`;
 override with `glyph_font`); components outside
 `min_glyph_height`…`max_glyph_height` / `max_glyph_width` or below
-`min_glyph_area` are ignored so tiny IR speckles and large non-text
-blobs are not read as letters) and the blink toggle
+`min_glyph_area` are ignored so tiny IR speckles and large glare patches
+are skipped; glyphs scoring below `min_glyph_match_score` are not forced
+to a letter — icon-only crops become `symbol-1`, `symbol-2`, …) and the
+blink toggle
 rate. Detection re-locates each element inside a search window around its
 calibrated box and emits four intensities: normalised Levenshtein text
 distance, centroid shift (px), relative box-area change, and toggle-rate

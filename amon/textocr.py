@@ -6,10 +6,15 @@ background, so full OCR is unnecessary. Characters are segmented via
 connected components, normalized to a fixed size and matched against
 glyph templates rendered from a TrueType font (default: bundled
 VCR OSD Mono). The recognizer covers ``A-Z`` and ``0-9``.
+
+Glyphs whose best template score falls below ``min_match_score`` are
+treated as non-letters (dots, crosshairs, icons) rather than forced into
+the nearest charset character.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -22,8 +27,29 @@ CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 GLYPH_SIZE = (24, 32)  # (width, height) of normalised glyphs
 CONFUSABLE = str.maketrans({"O": "0", "I": "1"})
 
+#: Default correlation×aspect floor for deciding letter vs icon.  Real OSD
+#: glyphs usually clear this; dots/crosshairs typically stay below ~0.30.
+#: If *any* glyph in a crop clears the gate the crop is treated as text
+#: (weaker neighbours still contribute their best letter so words stay intact).
+DEFAULT_MIN_MATCH_SCORE = 0.45
+
 FONTS_DIR = Path(__file__).with_name("fonts")
 DEFAULT_GLYPH_FONT = "VCR_OSD_MONO_1.001.ttf"
+
+
+@dataclass(frozen=True)
+class HudRead:
+    """Result of reading a HUD crop.
+
+    ``text`` holds only glyphs that cleared the match-score gate.  When the
+    crop has ink but nothing is confidently a letter/digit, ``is_symbol`` is
+    True so callers can assign a ``symbol-N`` id instead of a false OCR slug.
+    """
+
+    text: str
+    is_symbol: bool
+    mean_score: float = 0.0
+
 
 
 def resolve_glyph_font(font: Optional[str] = None) -> Path:
@@ -83,8 +109,8 @@ def _match_char(
     glyph: np.ndarray,
     aspect: float,
     templates: Dict[str, Tuple[np.ndarray, float]],
-) -> str:
-    """Best charset character by correlation, weighted by aspect similarity.
+) -> Tuple[str, float]:
+    """Best charset character and its correlation×aspect score.
 
     The aspect-ratio weight disambiguates glyph pairs that look alike once
     stretched to the canonical size (e.g. ``0`` vs ``O``, ``1`` vs ``I``).
@@ -98,7 +124,78 @@ def _match_char(
         if score > best_score:
             best_char, best_score = char, score
 
-    return best_char
+    return best_char, float(best_score)
+
+
+def read_hud(
+    gray: np.ndarray,
+    threshold: Optional[int] = None,
+    *,
+    min_glyph_height: int = 8,
+    min_glyph_area: int = 20,
+    max_glyph_height: int = 64,
+    max_glyph_width: int = 64,
+    glyph_font: Optional[str] = None,
+    min_match_score: float = DEFAULT_MIN_MATCH_SCORE,
+) -> HudRead:
+    """Recognise bright HUD content in a grayscale crop.
+
+    Glyphs scoring below ``min_match_score`` are skipped (not forced to the
+    nearest letter).  If components remain but none clear the gate,
+    ``is_symbol`` is True so the caller can name the overlay ``symbol-N``.
+    """
+    templates = _templates_for(str(resolve_glyph_font(glyph_font)))
+
+    if threshold is None:
+        threshold, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    binary = (gray > threshold).astype(np.uint8)
+    count, _, stats, _ = cv2.connectedComponentsWithStats(binary)
+
+    min_h = max(1, int(min_glyph_height))
+    max_h = max(min_h, int(max_glyph_height))
+    max_w = max(1, int(max_glyph_width))
+    min_area = max(1, int(min_glyph_area))
+    score_gate = float(min_match_score)
+
+    boxes: List[tuple] = []
+    for i in range(1, count):
+        x, y, w, h, area = stats[i]
+        if min_h <= h <= max_h and w <= max_w and area >= min_area:
+            boxes.append((x, y, w, h))
+
+    if not boxes:
+        return HudRead(text="", is_symbol=False, mean_score=0.0)
+
+    boxes.sort(key=lambda b: b[0])
+    median_width = float(np.median([b[2] for b in boxes]))
+
+    scored: List[Tuple[int, int, int, int, str, float]] = []
+    for x, y, w, h in boxes:
+        glyph, aspect = _normalise(binary[y : y + h, x : x + w] > 0)
+        char, score = _match_char(glyph, aspect, templates)
+        scored.append((x, y, w, h, char, score))
+
+    scores = [s for *_rest, s in scored]
+    mean_score = float(np.mean(scores)) if scores else 0.0
+    if not any(s >= score_gate for s in scores):
+        # Ink passed the size gates but nothing looked like a letter/digit.
+        return HudRead(text="", is_symbol=True, mean_score=mean_score)
+
+    # At least one confident glyph → treat as text.  Keep best-char for every
+    # component (including weaker ones) so a single soft letter cannot punch
+    # holes in a real word such as ``STAT01``.
+    text, prev_right = "", None
+    for x, y, w, h, char, _score in scored:
+        if prev_right is not None and (x - prev_right) > 0.6 * median_width:
+            text += " "
+        text += char
+        prev_right = x + w
+    return HudRead(
+        text=text.translate(CONFUSABLE),
+        is_symbol=False,
+        mean_score=mean_score,
+    )
 
 
 def read_text(
@@ -110,62 +207,24 @@ def read_text(
     max_glyph_height: int = 64,
     max_glyph_width: int = 64,
     glyph_font: Optional[str] = None,
+    min_match_score: float = DEFAULT_MIN_MATCH_SCORE,
 ) -> str:
     """Recognise bright text in a grayscale crop, including word spaces.
 
-    Without an explicit ``threshold`` the text/background split is found
-    with Otsu's method, which keeps anti-aliased stroke edges intact.
-
-    Connected components outside ``[min_glyph_height, max_glyph_height]``
-    or wider than ``max_glyph_width``, or with fewer than ``min_glyph_area``
-    bright pixels, are ignored — this rejects tiny IR speckles and large
-    non-text bright regions that would otherwise match letter templates.
-
-    ``glyph_font`` selects the TrueType file used for templates (see
-    :func:`resolve_glyph_font`).
+    Low-confidence glyph matches are omitted (see :func:`read_hud`).  Returns
+    an empty string for pure symbol/icon crops — use :func:`read_hud` when
+    callers need to distinguish symbols from empty crops.
     """
-    templates = _templates_for(str(resolve_glyph_font(glyph_font)))
-
-    # Find the threshold for the text/background split using Otsu's method.
-    if threshold is None:
-        threshold, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # Create a binary image of the text/background split.
-    binary = (gray > threshold).astype(np.uint8)
-    count, _, stats, _ = cv2.connectedComponentsWithStats(binary)
-
-    min_h = max(1, int(min_glyph_height))
-    max_h = max(min_h, int(max_glyph_height))
-    max_w = max(1, int(max_glyph_width))
-    min_area = max(1, int(min_glyph_area))
-
-    # Find the bounding boxes of glyph-sized components only.
-    boxes: List[tuple] = []
-    for i in range(1, count):
-        x, y, w, h, area = stats[i]
-        if min_h <= h <= max_h and w <= max_w and area >= min_area:
-            boxes.append((x, y, w, h))
-
-    if not boxes:
-        return ""
-
-    # Sort the bounding boxes by the x-coordinate.
-    boxes.sort(key=lambda b: b[0])
-
-    # Calculate the median width of the bounding boxes.
-    median_width = float(np.median([b[2] for b in boxes]))
-
-    # Iterate over the bounding boxes and extract the text.
-    text, prev_right = "", None
-    for x, y, w, h in boxes:
-        if prev_right is not None and (x - prev_right) > 0.6 * median_width:
-            text += " "
-        glyph, aspect = _normalise(binary[y : y + h, x : x + w] > 0)
-        text += _match_char(glyph, aspect, templates)
-        prev_right = x + w
-
-    # Account for confusable characters by canonicalizing them.
-    return text.translate(CONFUSABLE)
+    return read_hud(
+        gray,
+        threshold,
+        min_glyph_height=min_glyph_height,
+        min_glyph_area=min_glyph_area,
+        max_glyph_height=max_glyph_height,
+        max_glyph_width=max_glyph_width,
+        glyph_font=glyph_font,
+        min_match_score=min_match_score,
+    ).text
 
 
 def slugify(text: str) -> str:

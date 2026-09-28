@@ -21,7 +21,7 @@ from amon.textocr import resolve_glyph_font
 
 WIDTH, HEIGHT = 320, 240
 FPS = 20.0
-DURATION = 112.0
+DURATION = 114.0
 
 #: Infrared landscape photograph shipped next to this module (package data).
 BACKGROUND_IMAGE = Path(__file__).resolve().with_name("infrared-landscape.png")
@@ -52,6 +52,8 @@ SCHEDULE: List[Tuple[str, float, float]] = [
     ("hud_new_mutate", 91.0, 96.0),
     # Gap so mutate tracks TTL out, then: 1000→2000 steps, blink, vanish.
     ("hud_new_cycle", 98.0, 107.0),
+    # Non-text icons: centre crosshair + side dot → symbol-N, not letter slugs.
+    ("hud_new_symbols", 109.0, 113.0),
 ]
 
 #: Anomaly ID patterns the default detector set is expected to report per
@@ -72,11 +74,13 @@ EXPECTED_EVENTS = {
     "hud_parallel_position": "hud/*/position",
     "hud_new_mutate": "hud/alert/new",
     "hud_new_cycle": "hud/1000/new",
+    "hud_new_symbols": "hud/symbol-*/new",
 }
 
 #: How many distinct events are expected for a schedule key (default 1).
 EXPECTED_EVENT_COUNTS = {
     "hud_new": 2,  # ALERT + WARN appear together → two hud/<slug>/new events
+    "hud_new_symbols": 2,  # crosshair + filled dot
 }
 
 #: Rotation centre for the spatial anomaly — over the bright tree canopy.
@@ -99,7 +103,7 @@ HUD_SPECS: Tuple[HudSpec, ...] = (
     HudSpec("cam", "CAM01", (14, 28), 1.0, 0.0),
     HudSpec("rec", "REC", (250, 28), 1.0, 2.0),
     HudSpec("temp", "TEMP22", (118, 28), 0.9, 1.0),
-    HudSpec("stat", "STAT01", (14, 220), 0.85, 0.0),
+    HudSpec("stat", "STAT01", (14, 220), 1.0, 0.0),
 )
 
 #: Overlays that appear only during the ``hud_new`` schedule window.
@@ -123,6 +127,12 @@ CYCLE_BLINK_HZ = 2.0
 CYCLE_TEXT_START = 1000
 CYCLE_TEXT_END = 2000
 CYCLE_TEXT_STEP = 200  # 1000, 1200, …, 2000
+
+#: Non-text icons for ``hud_new_symbols`` (must score below glyph match gate).
+SYMBOL_CROSSHAIR_CENTER = (WIDTH // 2, HEIGHT // 2)  # frame centre
+SYMBOL_DOT_CENTER = (280, 170)  # clear of calibrated HUD corners
+SYMBOL_START = 109.0
+SYMBOL_END = 113.0
 
 
 def cycle_hud_text(t: float) -> str:
@@ -191,6 +201,21 @@ class SyntheticVideo:
         pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         ImageDraw.Draw(pil).text(top_left, text, fill=(255, 255, 255), font=font)
         img[:] = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
+
+    @staticmethod
+    def _draw_crosshair(
+        img: np.ndarray, center: Tuple[int, int], arm: int = 18, thickness: int = 2
+    ) -> None:
+        """White crosshair (non-text icon) centred on ``center``."""
+        cx, cy = center
+        color = (255, 255, 255)
+        cv2.line(img, (cx, cy - arm), (cx, cy + arm), color, thickness)
+        cv2.line(img, (cx - arm, cy), (cx + arm, cy), color, thickness)
+
+    @staticmethod
+    def _draw_dot(img: np.ndarray, center: Tuple[int, int], radius: int = 10) -> None:
+        """Filled white disk (non-text icon)."""
+        cv2.circle(img, center, radius, (255, 255, 255), thickness=-1)
 
     def _hud_text(self, spec: HudSpec, active: Set[str]) -> str:
         if spec.key == "cam" and (
@@ -262,6 +287,10 @@ class SyntheticVideo:
             self._draw_text(
                 img, cycle_hud_text(t), CYCLE_HUD.org, CYCLE_HUD.scale
             )
+
+        if "hud_new_symbols" in active:
+            self._draw_crosshair(img, SYMBOL_CROSSHAIR_CENTER)
+            self._draw_dot(img, SYMBOL_DOT_CENTER)
 
         if "contrast" in active:
             mean = img.mean()

@@ -105,6 +105,27 @@ class TestEventDetection:
         assert event["end"] - event["start"] >= 6.0
         assert not any(e["anomaly_id"] == "hud/2000/new" for e in events)
 
+    def test_hud_new_symbols_are_not_letters(self, db_events):
+        """Centre crosshair + side dot must open two symbol-N /new events."""
+        _, _, events = db_events
+        hits = [
+            e
+            for e in events
+            if matches(e["anomaly_id"], "hud/symbol-*/new")
+            and abs(e["start"] - 109.0) <= START_TOLERANCE
+        ]
+        ids = sorted(e["anomaly_id"] for e in hits)
+        assert ids == ["hud/symbol-1/new", "hud/symbol-2/new"]
+        # No false letter/digit channels in that window.
+        letterish = [
+            e
+            for e in events
+            if e["anomaly_id"].endswith("/new")
+            and abs(e["start"] - 109.0) <= START_TOLERANCE
+            and not e["anomaly_id"].startswith("hud/symbol-")
+        ]
+        assert letterish == []
+
     def test_parallel_hud_changes_are_differentiated(self, db_events):
         _, _, events = db_events
         text_hits = [

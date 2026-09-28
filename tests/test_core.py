@@ -6,7 +6,7 @@ import pytest
 from amon.config import DEFAULTS, load_config, merge_defaults
 from amon.plugins import instantiate, load_class
 from amon.stats import robust_threshold
-from amon.textocr import levenshtein_norm, read_text, slugify
+from amon.textocr import levenshtein_norm, read_hud, read_text, slugify
 
 
 class TestRobustThreshold:
@@ -161,18 +161,41 @@ class TestTextOcr:
         canvas = np.zeros((40, 40), np.uint8)
         canvas[10:13, 10:13] = 255  # 3x3 speck — below default min height/area
         assert read_text(canvas) == ""
-        # Same speck is accepted only if thresholds are lowered
-        assert read_text(canvas, min_glyph_height=2, min_glyph_area=4) != ""
+        # Same speck clears size gates only if thresholds are lowered; it still
+        # fails the letter-score gate and is reported as a symbol, not text.
+        assert read_text(canvas, min_glyph_height=2, min_glyph_area=4) == ""
+        assert read_hud(canvas, min_glyph_height=2, min_glyph_area=4).is_symbol
 
     def test_rejects_oversized_blobs(self):
         """Large bright regions must not be treated as glyphs."""
         canvas = np.zeros((120, 120), np.uint8)
         canvas[10:100, 10:100] = 255  # 90x90 — above default max height/width
         assert read_text(canvas) == ""
-        assert read_text(canvas, max_glyph_height=100, max_glyph_width=100) != ""
+        # Even with raised size caps, a solid block is not a confident letter.
+        assert read_text(canvas, max_glyph_height=100, max_glyph_width=100) == ""
+        assert read_hud(
+            canvas, max_glyph_height=100, max_glyph_width=100
+        ).is_symbol
+
+    def test_icons_are_symbols_not_forced_letters(self):
+        import cv2
+
+        # Filled dot previously forced to "4"; must be a symbol now.
+        dot = np.zeros((48, 48), np.uint8)
+        cv2.circle(dot, (24, 24), 10, 255, -1)
+        result = read_hud(dot)
+        assert result.is_symbol
+        assert result.text == ""
+        assert read_text(dot) == ""
+
+        cross = np.zeros((64, 64), np.uint8)
+        cv2.line(cross, (32, 8), (32, 56), 255, 2)
+        cv2.line(cross, (8, 32), (56, 32), 255, 2)
+        assert read_hud(cross).is_symbol
 
     def test_empty_image_reads_empty(self):
         assert read_text(np.zeros((20, 20), np.uint8)) == ""
+        assert not read_hud(np.zeros((20, 20), np.uint8)).is_symbol
 
     def test_resolve_default_font(self):
         from amon.textocr import DEFAULT_GLYPH_FONT, resolve_glyph_font

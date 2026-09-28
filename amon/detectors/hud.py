@@ -42,7 +42,7 @@ import numpy as np
 from amon.detectors import Detector
 from amon.model import Box, CalibrationResult, Frame
 from amon.stats import robust_threshold
-from amon.textocr import levenshtein_norm, read_text, slugify
+from amon.textocr import DEFAULT_MIN_MATCH_SCORE, levenshtein_norm, read_hud, slugify
 
 
 def _is_new_anomaly(anomaly_id: str) -> bool:
@@ -98,6 +98,9 @@ class HudDetector(Detector):
             "max_glyph_height": 64,  # max glyph height (px) — rejects large non-text blobs
             "max_glyph_width": 64,  # max glyph width (px)
             "min_glyph_area": 20,  # min bright pixels per glyph component
+            # Reject forced letter matches below this correlation×aspect score
+            # (icons/dots/crosshairs); those overlays become symbol-1, …
+            "min_glyph_match_score": DEFAULT_MIN_MATCH_SCORE,
             # TrueType under amon/fonts/ (or absolute path); default VCR OSD Mono
             "glyph_font": "VCR_OSD_MONO_1.001.ttf",
             "merge_kernel": 15,  # dilation size merging glyphs to elements
@@ -132,6 +135,7 @@ class HudDetector(Detector):
         self._last_new: List[Tuple[str, Box, str]] = []  # (anomaly_id, box, text)
         self._new_floor = float(self.config["new_floor"])
         self._new_tracks: List[_RuntimeNewTrack] = []
+        self._symbol_serial = 0  # symbol-1, symbol-2, … for non-text overlays
         self._new_frame_t: float = 0.0
 
     # --- calibration --------------------------------------------------------
@@ -208,8 +212,9 @@ class HudDetector(Detector):
         self, box: Box, union: np.ndarray, masks: List[np.ndarray]
     ) -> CalibratedHudElement:
         x, y, w, h = box
-        text = self._read_element_text(self._max_img[y : y + h, x : x + w])
-        element_id = slugify(text) or f"elem{x}x{y}"
+        text, element_id = self._label_element_crop(
+            self._max_img[y : y + h, x : x + w], fallback_id=f"elem{x}x{y}"
+        )
         while element_id in self._elements:  # ensure uniqueness
             element_id += "x"
 
@@ -356,7 +361,7 @@ class HudDetector(Detector):
         for box in self._find_element_bounding_boxes(novel):
             x, y, w, h = box
             centroid = _box_centroid(box)
-            text = self._read_element_text(gray[y : y + h, x : x + w]).strip()
+            text, is_symbol = self._read_element_label(gray[y : y + h, x : x + w])
 
             track = self._nearest_new_track(centroid, match_dist, used_track_ids)
             if track is None:
@@ -369,17 +374,23 @@ class HudDetector(Detector):
                 track.centroid = centroid
                 track.last_box = box
                 track.last_seen = timestamp
-                if text:
+                # Freeze ID; only refresh display text when OCR is confident.
+                if text and not is_symbol:
                     track.last_text = text
                 used_track_ids.add(id(track))
                 intensities[track.anomaly_id] = 1.0
                 self._last_new.append((track.anomaly_id, box, track.last_text))
                 continue
 
-            if not text:
-                continue  # glare / icons: no track to attach to
+            if not text and not is_symbol:
+                continue  # empty crop (no ink in glyph-size range)
 
-            slug = slugify(text) or f"elem{x}x{y}"
+            if is_symbol:
+                slug = self._next_symbol_id()
+                label = slug
+            else:
+                slug = slugify(text) or f"elem{x}x{y}"
+                label = text
             aid = f"hud/{slug}/new"
             # Same frozen ID still alive but unmatched → reconnect, don't fork.
             orphan = next(
@@ -394,26 +405,32 @@ class HudDetector(Detector):
                 orphan.centroid = centroid
                 orphan.last_box = box
                 orphan.last_seen = timestamp
-                orphan.last_text = text
+                if text and not is_symbol:
+                    orphan.last_text = text
                 used_track_ids.add(id(orphan))
                 intensities[aid] = 1.0
-                self._last_new.append((aid, box, text))
+                self._last_new.append((aid, box, orphan.last_text))
                 continue
             # Two novel blobs with the same OCR in one frame → disambiguate.
             if aid in intensities:
-                aid = f"hud/{slug}_{x}x{y}/new"
+                if is_symbol:
+                    slug = self._next_symbol_id()
+                    label = slug
+                    aid = f"hud/{slug}/new"
+                else:
+                    aid = f"hud/{slug}_{x}x{y}/new"
             self._thresholds.setdefault(aid, self._new_floor)
             new_track = _RuntimeNewTrack(
                 anomaly_id=aid,
                 centroid=centroid,
                 last_box=box,
-                last_text=text,
+                last_text=label,
                 last_seen=timestamp,
             )
             self._new_tracks.append(new_track)
             used_track_ids.add(id(new_track))
             intensities[aid] = 1.0
-            self._last_new.append((aid, box, text))
+            self._last_new.append((aid, box, label))
 
         return intensities
 
@@ -502,16 +519,41 @@ class HudDetector(Detector):
 
         return pos_error, size_error, levenshtein_distance
 
-    def _read_element_text(self, gray: np.ndarray) -> str:
-        """OCR a HUD crop, keeping only components within the glyph size bounds."""
-        return read_text(
+    def _next_symbol_id(self) -> str:
+        """Allocate the next ``symbol-N`` label for a non-text overlay."""
+        self._symbol_serial += 1
+        return f"symbol-{self._symbol_serial}"
+
+    def _label_element_crop(
+        self, gray: np.ndarray, *, fallback_id: str
+    ) -> Tuple[str, str]:
+        """Return ``(display_text, element_id)`` for a calibrated HUD crop."""
+        text, is_symbol = self._read_element_label(gray)
+        if is_symbol:
+            symbol_id = self._next_symbol_id()
+            return symbol_id, symbol_id
+        element_id = slugify(text) or fallback_id
+        return text, element_id
+
+    def _read_element_label(self, gray: np.ndarray) -> Tuple[str, bool]:
+        """OCR a HUD crop → ``(text, is_symbol)``."""
+        result = read_hud(
             gray,
             min_glyph_height=int(self.config["min_glyph_height"]),
             max_glyph_height=int(self.config["max_glyph_height"]),
             max_glyph_width=int(self.config["max_glyph_width"]),
             min_glyph_area=int(self.config["min_glyph_area"]),
             glyph_font=str(self.config.get("glyph_font") or ""),
+            min_match_score=float(
+                self.config.get("min_glyph_match_score", DEFAULT_MIN_MATCH_SCORE)
+            ),
         )
+        return result.text.strip(), result.is_symbol
+
+    def _read_element_text(self, gray: np.ndarray) -> str:
+        """OCR a HUD crop (empty string for pure symbol/icon ink)."""
+        text, _is_symbol = self._read_element_label(gray)
+        return text
 
     @staticmethod
     def _is_hud_element_visible(mask: np.ndarray, box: Box, pixel_count: int) -> bool:

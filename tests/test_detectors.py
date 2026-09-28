@@ -182,6 +182,41 @@ class TestHudDetector:
                 assert "hud/1000/new" not in intensities
         assert seen_ids == {"hud/alert/new"}
 
+    def test_non_text_icon_spawns_as_symbol(self, scene):
+        """Dots/crosshairs must not be forced into a letter slug."""
+        import cv2
+
+        from amon.model import Frame
+
+        detector = self._fresh(scene, 10.0)
+        # Build a frame from clean footage with a filled dot outside HUD cover.
+        base = scene.frame(10.0, index=200)
+        img = base.copy()
+        cv2.circle(img, (160, 120), 12, (255, 255, 255), -1)
+        intensities = detector.process(
+            Frame(index=201, timestamp=10.05, image=img)
+        )
+        new_aids = [aid for aid in intensities if aid.endswith("/new")]
+        assert new_aids == ["hud/symbol-1/new"]
+        assert detector.metadata("hud/symbol-1/new").get("text") == "symbol-1"
+
+    def test_scheduled_crosshair_and_dot_are_symbols(self, scene):
+        """Synth schedule draws a centre crosshair + side dot as symbol-N /new."""
+        from amon.synthetic import SYMBOL_END, SYMBOL_START
+
+        detector = self._fresh(scene, SYMBOL_START - 2.0)
+        seen = set()
+        for frame in make_frames(scene, SYMBOL_START, SYMBOL_END):
+            intensities = detector.process(frame)
+            seen.update(aid for aid in intensities if aid.endswith("/new"))
+        assert seen == {"hud/symbol-1/new", "hud/symbol-2/new"}
+        # Must not invent letter/digit slugs for these icons.
+        assert not any(
+            aid.split("/")[1] not in {"symbol-1", "symbol-2"} for aid in seen
+        )
+        for aid in seen:
+            assert detector.metadata(aid).get("text", "").startswith("symbol-")
+
     def test_new_overlay_survives_numeric_steps_and_blink(self, scene):
         """1000 → 2000 in steps, then blink — still a single hud/1000/new."""
         from amon.synthetic import (
@@ -216,7 +251,7 @@ class TestHudDetector:
 
     def test_dynamic_new_thresholds_are_forgotten_after_ttl(self, scene):
         """Pruned runtime tracks must not leave thresholds forever."""
-        from amon.synthetic import CYCLE_START
+        from amon.synthetic import CYCLE_START, SYMBOL_END
 
         detector = HudDetector({"new_track_ttl_seconds": 0.5})
         calibrate(detector, scene)
@@ -224,8 +259,8 @@ class TestHudDetector:
         for frame in make_frames(scene, CYCLE_START, CYCLE_START + 1.0):
             detector.process(frame)
         assert any(aid.endswith("/new") for aid in detector.thresholds())
-        # After the schedule window + TTL, clean frames must forget the channel.
-        for frame in make_frames(scene, 108.0, 110.0):
+        # After the last scheduled /new window + TTL, clean frames forget it.
+        for frame in make_frames(scene, SYMBOL_END + 0.5, SYMBOL_END + 2.0):
             detector.process(frame)
         assert not any(aid.endswith("/new") for aid in detector.thresholds())
         assert detector._new_tracks == []

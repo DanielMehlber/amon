@@ -43,6 +43,7 @@ detectors:
         blink: 1.0
         new: 1.0
       glyph_font: VCR_OSD_MONO_1.001.ttf   # file under amon/fonts/ (or absolute path)
+      # min_glyph_match_score: 0.55        # below this → symbol-N, not a forced letter
       # max_glyph_height: 64              # reject oversized bright blobs as letters
       # max_glyph_width: 64
   - class: amon.detectors.spatial.SpatialDetector

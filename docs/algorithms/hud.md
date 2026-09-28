@@ -26,7 +26,13 @@ folder and set `glyph_font` on `HudDetector` to switch.
 **Size gates:** Components shorter than `min_glyph_height`, taller than
 `max_glyph_height`, wider than `max_glyph_width`, or with fewer than
 `min_glyph_area` bright pixels are ignored — this filters IR speckles and
-large non-text bright regions.
+large glare patches.  Each remaining blob is scored against the charset;
+matches below `min_glyph_match_score` (default ~0.45) are **not** forced to
+the nearest letter.  Crops where every blob fails that gate are non-text
+icons and get ids `symbol-1`, `symbol-2`, … (a filled dot is no longer
+read as `4`).  If at least one glyph clears the gate the crop is treated
+as text and weaker neighbours still use their best letter so words such as
+`STAT01` stay intact.
 
 **Otsu thresholding** picks a text/background split per crop so
 anti-aliased edges survive binarization.
@@ -75,8 +81,9 @@ the blob disappears. Runtime overlays never emit calibrated-style
 `new_track_ttl_seconds` are pruned and their dynamic thresholds dropped so
 multi-day runs cannot accumulate one map entry per historical overlay.
 
-Bright non-text blobs (glare, icons without readable glyphs) are ignored
-at spawn; an already-tracked blob may keep its ID briefly even if OCR
+Bright non-text icons (dots, crosshairs, etc.) whose glyph scores stay below
+`min_glyph_match_score` spawn as `hud/symbol-N/new` rather than a false
+letter slug.  An already-tracked blob may keep its ID briefly even if OCR
 fails for a frame.
 
 ## Per-element anomaly IDs
