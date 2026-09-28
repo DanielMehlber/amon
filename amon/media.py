@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import cv2
 import numpy as np
@@ -44,20 +44,47 @@ def subsample(
     return list(frames)[::stride]
 
 
+def regions_at(
+    timeline: Sequence[Tuple[float, Sequence[Box]]],
+    timestamp: float,
+    fallback: Sequence[Box] = (),
+) -> List[Box]:
+    """Latest non-empty boxes at or before ``timestamp`` (else ``fallback``)."""
+    chosen: List[Box] = [tuple(box) for box in fallback]  # type: ignore[misc]
+    for t, boxes in timeline:
+        if t > timestamp:
+            break
+        if boxes:
+            chosen = [tuple(box) for box in boxes]  # type: ignore[misc]
+    return chosen
+
+
 def write_event_gif(
     frames: TimedFrames,
     event: AnomalyEvent,
     path: Union[str, Path],
     fps: float,
     gif_fps: float,
+    region_timeline: Optional[Sequence[Tuple[float, Sequence[Box]]]] = None,
 ) -> str:
-    """Render an event evidence GIF, highlighting affected regions."""
+    """Render an event evidence GIF, highlighting affected regions.
+
+    When ``region_timeline`` is provided (timestamp → boxes), each frame uses
+    the latest marker for that time so overlays that rewrite glyphs or resize
+    stay highlighted.  Otherwise ``event.regions`` is drawn on every frame.
+    """
     selected = subsample(frames, fps, gif_fps)
+    timeline = list(region_timeline or [])
     rendered = []
     for t, image in selected:
         canvas = image.copy()
         if event.start <= t <= event.end:
-            for box in event.regions:
+            boxes = (
+                regions_at(timeline, t, event.regions)
+                if timeline
+                else event.regions
+            )
+            for box in boxes:
                 _draw_box(canvas, box, HIGHLIGHT)
             cv2.putText(
                 canvas,
@@ -71,6 +98,7 @@ def write_event_gif(
             )
         rendered.append(canvas)
     return write_gif(rendered, path, min(gif_fps, fps))
+
 
 
 def annotate_calibration(image: np.ndarray, annotations: dict) -> np.ndarray:

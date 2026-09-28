@@ -85,6 +85,7 @@ class Pipeline:
         self._gif_fps = float(media_cfg.get("gif_max_fps", 10.0))
         self._detector_of: Dict[str, Detector] = {}
         self._clips: Dict[str, List[Tuple[float, np.ndarray]]] = {}
+        self._region_timelines: Dict[str, List[Tuple[float, list]]] = {}
         self._enrichment: Dict[str, Tuple[dict, list]] = {}
         self._last_open_sync = 0.0
         self._max_clip_frames: int = 0  # set once fps is known in run()
@@ -235,23 +236,30 @@ class Pipeline:
 
         for anomaly_id in discarded:  # too short to report - free capture state
             self._clips.pop(anomaly_id, None)
+            self._region_timelines.pop(anomaly_id, None)
             self._enrichment.pop(anomaly_id, None)
             self._forget_dynamic_channel(anomaly_id)
             worker.submit_discard(anomaly_id)
 
         for anomaly_id in opened:
             detector = self._detector_of[anomaly_id]
-            self._enrichment[anomaly_id] = (
-                detector.metadata(anomaly_id),
-                [list(box) for box in detector.regions(anomaly_id)],
-            )
+            boxes = [list(box) for box in detector.regions(anomaly_id)]
+            self._enrichment[anomaly_id] = (detector.metadata(anomaly_id), boxes)
             # Start the evidence clip with lead-in frames from the ring buffer,
             # already subsampled to GIF rate so queue payloads stay small.
             lead_start = frame.timestamp - self._lead
             self._clips[anomaly_id] = self._subsample_clip(
                 [(t, img) for t, img in ring if t >= lead_start]
             )
+            self._region_timelines[anomaly_id] = (
+                [(frame.timestamp, boxes)] if boxes else []
+            )
             self._publish_open(anomaly_id, worker)
+
+        # Refresh live boxes so GIF markers and ongoing rows follow overlays
+        # that rewrite glyphs / resize while the event stays open.
+        for anomaly_id in list(self._clips):
+            self._refresh_enrichment(anomaly_id)
 
         if frame.timestamp - self._last_open_sync >= OPEN_SYNC_INTERVAL_SECONDS:
             for anomaly_id in self.aggregator.peek_open():
@@ -267,9 +275,26 @@ class Pipeline:
                 and frame.timestamp - clip[-1][0] >= self._clip_interval - 1e-9
             ):
                 clip.append((frame.timestamp, frame.image))
+                _, boxes = self._enrichment.get(anomaly_id, ({}, []))
+                if boxes:
+                    self._region_timelines.setdefault(anomaly_id, []).append(
+                        (frame.timestamp, list(boxes))
+                    )
 
         for event in closed:
             self._finalize_event(event, worker, fps)
+
+    def _refresh_enrichment(self, anomaly_id: str) -> None:
+        """Update metadata/regions from the live detector (keep last boxes on gaps)."""
+        detector = self._detector_of.get(anomaly_id)
+        if detector is None:
+            return
+        prev_meta, prev_boxes = self._enrichment.get(anomaly_id, ({}, []))
+        boxes = [list(box) for box in detector.regions(anomaly_id)]
+        meta = detector.metadata(anomaly_id)
+        if not boxes:
+            boxes = prev_boxes
+        self._enrichment[anomaly_id] = (meta or prev_meta, boxes)
 
     def _subsample_clip(
         self, frames: List[Tuple[float, np.ndarray]]
@@ -308,7 +333,8 @@ class Pipeline:
         event.metadata = metadata
         event.regions = regions
         clip = self._clips.pop(event.anomaly_id, [])
-        worker.submit_event(event, clip, fps)
+        region_timeline = self._region_timelines.pop(event.anomaly_id, [])
+        worker.submit_event(event, clip, fps, region_timeline=region_timeline)
         self._forget_dynamic_channel(event.anomaly_id)
         log.info(
             "event %s: %.1fs-%.1fs (%.1fs, peak %.2f)",

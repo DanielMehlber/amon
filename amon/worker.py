@@ -80,21 +80,28 @@ class BackgroundWorker:
         self._put_best_effort(("discard", anomaly_id))
 
     def submit_event(
-        self, event: AnomalyEvent, frames: List[Tuple[float, np.ndarray]], fps: float
+        self,
+        event: AnomalyEvent,
+        frames: List[Tuple[float, np.ndarray]],
+        fps: float,
+        region_timeline: Optional[List[Tuple[float, list]]] = None,
     ) -> None:
         """Queue a finalised event for media generation and persistence.
 
-        If the queue stays full, retries once **without** evidence frames so the
-        DB row is not lost; only then logs and drops the job (session continues).
+        ``region_timeline`` maps timestamps to highlight boxes so GIF markers
+        can follow a moving / resizing overlay.  If the queue stays full,
+        retries once **without** evidence frames so the DB row is not lost;
+        only then logs and drops the job (session continues).
         """
-        if self._put_blocking(("event", event, frames, fps), fatal=False):
+        timeline = list(region_timeline or [])
+        if self._put_blocking(("event", event, frames, fps, timeline), fatal=False):
             return
         if frames:
             log.warning(
                 "background queue full — persisting %s without evidence GIF",
                 event.anomaly_id,
             )
-            if self._put_blocking(("event", event, [], fps), fatal=False):
+            if self._put_blocking(("event", event, [], fps, []), fatal=False):
                 return
         log.error(
             "background worker queue full — dropping event %s persistence",
@@ -175,11 +182,18 @@ def _handle_job(
         _, anomaly_id = job
         db.discard_ongoing_event(session_id, anomaly_id)
     elif kind == "event":
-        _, event, frames, fps = job
+        # region_timeline is optional for older in-flight job shapes.
+        if len(job) >= 5:
+            _, event, frames, fps, region_timeline = job
+        else:
+            _, event, frames, fps = job
+            region_timeline = []
         path = None
         if frames:
             path = _handle_media(
-                lambda p: media.write_event_gif(frames, event, p, fps, gif_fps),
+                lambda p: media.write_event_gif(
+                    frames, event, p, fps, gif_fps, region_timeline=region_timeline
+                ),
                 media_root / session_id,
             )
         db.complete_event(session_id, event, media=path)
