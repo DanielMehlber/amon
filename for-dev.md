@@ -72,9 +72,13 @@ Implement `fps` and `frames()` (a generator of `Frame` objects), raise
   capture cards (`amon/sources/stream.py`).  Prefer numeric ``device``
   indices (portable across Linux/macOS/Windows); OpenCV selects the native
   backend via ``CAP_ANY``.  Native resolution and FPS are auto-detected;
-  ``processing_fps`` optionally throttles output.  When the configured
-  device is unavailable, open alternatives are listed in the error before
-  the pipeline aborts.
+  ``processing_fps`` optionally throttles output.  A reader thread feeds a
+  dropping ``frame_buffer_size`` queue (default 1) so a slow pipeline
+  discards oldest frames instead of growing RAM; sustained drops log a
+  hardware-too-slow warning.  Transient capture failures reopen the device
+  up to ``reconnect_attempts`` times.  When the configured device is
+  unavailable, open alternatives are listed in the error before the
+  pipeline aborts.
 
 Reference a plugin from the config by dotted class path; no core changes needed.
 
@@ -136,8 +140,9 @@ calibrated box and emits four intensities: normalised Levenshtein text
 distance, centroid shift (px), relative box-area change, and toggle-rate
 deviation over a sliding window (covers frequency change and blink
 start/stop with a single metric). Unexpected overlays each get a channel
-``hud/<slug>/new`` (one event per appearing element) when readable text
-appears outside every calibrated element's search window.
+``hud/<slug>/new`` named from the **first** OCR reading (letters or digits);
+continuity is by centroid so later glyph rewrites do not open a second
+event or calibrated-style text/position/size/blink anomalies.
 
 ### Spatial detector (`detectors/spatial.py`)
 
@@ -163,9 +168,10 @@ anomalies that have not closed yet; closing promotes the same row to
 
 Per-run diagnostic logs go to `logging.dir` / `<session_id>.log` (default
 `logs/`). Console and file levels are set separately (`console_level`,
-`file_level`; defaults INFO / DEBUG). Use `file_level: DEBUG` (or
-`--log-level DEBUG`) to record aggregation decisions (OPEN / CLOSE /
-DISCARD / SUPPRESSED) — useful on field machines without a debugger.
+`file_level`; defaults INFO / DEBUG). Files rotate at `logging.max_bytes`
+(50 MiB) with `backup_count` backups so multi-day DEBUG traces cannot fill
+the disk. Use `file_level: DEBUG` (or `--log-level DEBUG`) to record
+aggregation decisions (OPEN / CLOSE / DISCARD / SUPPRESSED).
 
 The `suppresses` config maps suppressor patterns to target patterns.
 ``*`` matches any path span with no capture binding; ``#`` matches one
@@ -178,17 +184,24 @@ drain - matching targets cannot open events.
 ## Persistence
 
 SQLite file `amon.sqlite` in `data_dir`; schema in `db.py` (sessions,
-calibrations, events). Event timestamps are seconds relative to session
-start; the session row holds the wall-clock epoch. Media files are stored
-under `media/<session>/` and referenced by path.
+calibrations, events). WAL journal mode is enabled for long-lived writers.
+Event timestamps are seconds relative to session start; the session row
+holds the wall-clock epoch. Media files are stored under `media/<session>/`
+and referenced by path. Disk usage for completed events/GIFs still grows
+with every anomaly over a multi-day run — operators should plan retention
+outside the monitor process.
 
 ## Background processing
 
-`BackgroundWorker` owns a `multiprocessing.Queue` and a worker process.
-The pipeline enqueues finalised events together with the already-captured
-evidence frames (ring buffer + live capture, clipped to
-`media.max_clip_seconds`); the worker encodes GIFs and writes the
-database. A media failure never loses the event record.
+`BackgroundWorker` owns a **bounded** `multiprocessing.Queue`
+(`media.queue_maxsize`, default 8) and a worker process. Ongoing refreshes
+are dropped when the queue is full; final events apply back-pressure, then
+degrade to a DB-only write (no evidence frames) rather than aborting the
+session. Each worker job is isolated with try/except so one failure cannot
+kill the process. The pipeline aborts if the worker process dies so RAM
+cannot grow without bound. Evidence clips are captured at `gif_max_fps`
+(not full source rate) and clipped to `media.max_clip_seconds`. A media
+failure never loses the event record.
 
 ## Export architecture
 

@@ -188,3 +188,47 @@ class TestEventAggregator:
         feed(agg, [i * 0.01 for i in range(2000)], lambda t: 5.0)
         event = agg.flush()[0]
         assert len(event.timeline) <= 101
+
+    def test_missing_reading_closes_open_dynamic_channel(self):
+        """Channels that vanish from readings (runtime /new) must cool down."""
+        agg = make_aggregator(cooldown_seconds=0.5, min_duration_seconds=0.4)
+        closed = []
+        for i in range(30):
+            t = i * 0.1
+            readings = {}
+            if 1.0 <= t <= 2.0:
+                readings["hud/alert/new"] = Reading(1.0, 0.5, "hud")
+            _, c, _ = agg.update(t, readings)
+            closed.extend(c)
+        closed.extend(agg.flush())
+        assert len(closed) == 1
+        assert closed[0].anomaly_id == "hud/alert/new"
+        assert closed[0].end == pytest.approx(2.0)
+        # A later reappearance is a separate event.
+        closed2 = []
+        for i in range(40, 70):
+            t = i * 0.1
+            readings = {}
+            if 4.5 <= t <= 5.5:
+                readings["hud/alert/new"] = Reading(1.0, 0.5, "hud")
+            _, c, _ = agg.update(t, readings)
+            closed2.extend(c)
+        closed2.extend(agg.flush())
+        assert len(closed2) == 1
+        assert closed2[0].start == pytest.approx(4.5)
+
+    def test_streak_map_prunes_stale_anomaly_ids(self):
+        """Linger-eligible streaks must not accumulate forever."""
+        agg = make_aggregator(
+            cooldown_seconds=0.5, min_duration_seconds=0.4, suppresses={}
+        )
+        # Many short spikes on unique dynamic IDs.
+        for i in range(50):
+            t = float(i)
+            aid = f"hud/spike{i}/new"
+            agg.update(t, {aid: Reading(1.0, 0.5, "hud")})
+            agg.update(t + 0.1, {})  # drop out immediately
+        # Far past linger+cooldown for early spikes.
+        agg.update(200.0, {})
+        assert len(agg._streaks) < 10
+

@@ -59,3 +59,30 @@ def test_file_debug_console_info_are_independent(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "event hud/cam01/text" in captured.err
     assert "probe-below-threshold-detail" not in captured.err
+
+
+def test_session_log_uses_rotating_handler(tmp_path):
+    from logging.handlers import RotatingFileHandler
+
+    configure_logging({"logging": {"console": False, "file_level": "INFO"}})
+    path = attach_session_log(
+        {
+            "logging": {
+                "console": False,
+                "file_level": "INFO",
+                "dir": str(tmp_path),
+                "max_bytes": 2048,
+                "backup_count": 2,
+            }
+        },
+        "Rotate-Me",
+    )
+    amon = logging.getLogger("amon")
+    handlers = [
+        h for h in amon.handlers if isinstance(h, RotatingFileHandler)
+    ]
+    assert len(handlers) == 1
+    assert handlers[0].maxBytes == 2048
+    assert handlers[0].backupCount == 2
+    assert path == tmp_path / "Rotate-Me.log"
+    detach_session_log()

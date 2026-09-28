@@ -25,9 +25,9 @@ calibrated box and four intensities are emitted per element ``<id>``:
   second, measured over a sliding window) from the calibrated rate.  This
   covers frequency changes as well as blink start/stop.
 
-Additionally each unexpected overlay gets its own channel
-``hud/<slug>/new`` (one event per appearing element) when bright text
-appears outside every calibrated element's search window.
+Additionally each unexpected overlay gets a channel ``hud/<slug>/new``
+named from the **first** OCR reading; continuity across frames is by
+centroid so later text/size changes do not open a second event.
 """
 
 from __future__ import annotations
@@ -50,6 +50,11 @@ def _is_new_anomaly(anomaly_id: str) -> bool:
     return len(parts) == 3 and parts[0] == "hud" and parts[2] == "new"
 
 
+def _box_centroid(box: Box) -> Tuple[float, float]:
+    x, y, w, h = box
+    return (x + w / 2.0, y + h / 2.0)
+
+
 @dataclass
 class CalibratedHudElement:
     """Calibrated baseline of a single HUD element."""
@@ -64,6 +69,17 @@ class CalibratedHudElement:
     on_ratio: float
     visibility: deque = field(default_factory=deque)  # (t, visible) sliding window
     last_box: Optional[Box] = None
+
+
+@dataclass
+class _RuntimeNewTrack:
+    """Unexpected overlay tracked by centroid; ID frozen at first OCR."""
+
+    anomaly_id: str
+    centroid: Tuple[float, float]
+    last_box: Box
+    last_text: str  # latest OCR (may differ from spawn slug)
+    last_seen: float
 
 
 class HudDetector(Detector):
@@ -92,6 +108,10 @@ class HudDetector(Detector):
             "size_floor": 0.25,  # min relative area change
             "blink_floor": 2.0,  # min toggle-rate deviation (1/s)
             "new_floor": 0.5,  # intensity when unexpected text is present
+            # Max centroid distance (px) to keep a runtime /new track across frames.
+            "new_match_distance_px": 30.0,
+            # Keep an unseen track this long so brief gaps reconnect to the same ID.
+            "new_track_ttl_seconds": 1.0,
             # Per-anomaly threshold multipliers (float also accepted).
             "tolerance": {
                 "text": 1.0,
@@ -111,6 +131,8 @@ class HudDetector(Detector):
         self._known_cover: Optional[np.ndarray] = None  # dilated calibrated footprint
         self._last_new: List[Tuple[str, Box, str]] = []  # (anomaly_id, box, text)
         self._new_floor = float(self.config["new_floor"])
+        self._new_tracks: List[_RuntimeNewTrack] = []
+        self._new_frame_t: float = 0.0
 
     # --- calibration --------------------------------------------------------
     def _calibrate(self, frame: Frame) -> None:
@@ -304,34 +326,128 @@ class HudDetector(Detector):
             out[f"hud/{eid}/size"] = size_change
             out[f"hud/{eid}/blink"] = blink_change
 
-        out.update(self._measure_new_text(mask, gray))
+        out.update(self._measure_new_text(mask, gray, frame.timestamp))
         return out
 
-    def _measure_new_text(self, mask: np.ndarray, gray: np.ndarray) -> Dict[str, float]:
-        """Per-element intensities for unexpected text outside calibrated HUDs."""
+    def _measure_new_text(
+        self, mask: np.ndarray, gray: np.ndarray, timestamp: float
+    ) -> Dict[str, float]:
+        """Track unexpected overlays by centroid; freeze ID from first OCR.
+
+        A blob outside ``known_cover`` is accepted when OCR is non-empty (spawn)
+        or when its centroid lies near an existing track (continuity even if
+        OCR briefly fails or the glyphs change).  Only ``hud/<slug>/new`` is
+        emitted — never text/position/size/blink for runtime-only overlays.
+        """
         self._last_new = []
+        self._new_frame_t = timestamp
         if self._known_cover is None:
             return {}
 
+        match_dist = float(self.config["new_match_distance_px"])
+        ttl = float(self.config["new_track_ttl_seconds"])
+        self._prune_new_tracks(timestamp, ttl)
         novel = mask & (self._known_cover == 0)
-        if not novel.any():
-            return {}
-
         intensities: Dict[str, float] = {}
+        if not novel.any():
+            return intensities
+
+        used_track_ids: set = set()
         for box in self._find_element_bounding_boxes(novel):
             x, y, w, h = box
+            centroid = _box_centroid(box)
             text = self._read_element_text(gray[y : y + h, x : x + w]).strip()
+
+            track = self._nearest_new_track(centroid, match_dist, used_track_ids)
+            if track is None:
+                # Glyph rewrites can shift the bbox centroid; allow a wider
+                # reconnect before spawning a second channel.
+                track = self._nearest_new_track(
+                    centroid, match_dist * 2.5, used_track_ids
+                )
+            if track is not None:
+                track.centroid = centroid
+                track.last_box = box
+                track.last_seen = timestamp
+                if text:
+                    track.last_text = text
+                used_track_ids.add(id(track))
+                intensities[track.anomaly_id] = 1.0
+                self._last_new.append((track.anomaly_id, box, track.last_text))
+                continue
+
             if not text:
-                continue  # bright non-text blobs (glare, icons) are ignored
+                continue  # glare / icons: no track to attach to
+
             slug = slugify(text) or f"elem{x}x{y}"
             aid = f"hud/{slug}/new"
-            # Disambiguate identical OCR text in the same frame.
+            # Same frozen ID still alive but unmatched → reconnect, don't fork.
+            orphan = next(
+                (
+                    t
+                    for t in self._new_tracks
+                    if t.anomaly_id == aid and id(t) not in used_track_ids
+                ),
+                None,
+            )
+            if orphan is not None:
+                orphan.centroid = centroid
+                orphan.last_box = box
+                orphan.last_seen = timestamp
+                orphan.last_text = text
+                used_track_ids.add(id(orphan))
+                intensities[aid] = 1.0
+                self._last_new.append((aid, box, text))
+                continue
+            # Two novel blobs with the same OCR in one frame → disambiguate.
             if aid in intensities:
                 aid = f"hud/{slug}_{x}x{y}/new"
             self._thresholds.setdefault(aid, self._new_floor)
+            new_track = _RuntimeNewTrack(
+                anomaly_id=aid,
+                centroid=centroid,
+                last_box=box,
+                last_text=text,
+                last_seen=timestamp,
+            )
+            self._new_tracks.append(new_track)
+            used_track_ids.add(id(new_track))
             intensities[aid] = 1.0
             self._last_new.append((aid, box, text))
+
         return intensities
+
+    def _nearest_new_track(
+        self,
+        centroid: Tuple[float, float],
+        match_dist: float,
+        used_track_ids: set,
+    ) -> Optional[_RuntimeNewTrack]:
+        best: Optional[_RuntimeNewTrack] = None
+        best_d = match_dist
+        for track in self._new_tracks:
+            if id(track) in used_track_ids:
+                continue
+            d = float(
+                np.hypot(
+                    centroid[0] - track.centroid[0], centroid[1] - track.centroid[1]
+                )
+            )
+            if d <= best_d:
+                best_d = d
+                best = track
+        return best
+
+    def _prune_new_tracks(self, timestamp: float, ttl: float) -> None:
+        kept: List[_RuntimeNewTrack] = []
+        for track in self._new_tracks:
+            if timestamp - track.last_seen <= ttl:
+                kept.append(track)
+            else:
+                # Forget dynamic thresholds so multi-day runs cannot accumulate
+                # one map entry per historical overlay slug.
+                self._thresholds.pop(track.anomaly_id, None)
+        self._new_tracks = kept
 
     def _measure_hud_element_changes(
         self,
@@ -415,7 +531,12 @@ class HudDetector(Detector):
         if _is_new_anomaly(anomaly_id):
             for aid, _box, text in self._last_new:
                 if aid == anomaly_id:
-                    return {"element": anomaly_id.split("/")[1], "text": text, "new": True}
+                    return {
+                        "element": anomaly_id.split("/")[1],
+                        "text": text,
+                        "spawn_id": anomaly_id.split("/")[1],
+                        "new": True,
+                    }
             return {"element": anomaly_id.split("/")[1], "new": True}
         element = self._element_for(anomaly_id)
         if element is None:

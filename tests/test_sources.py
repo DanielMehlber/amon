@@ -1,5 +1,6 @@
 """Unit tests for the video source abstraction."""
 
+import time
 from unittest.mock import patch
 
 import cv2
@@ -80,6 +81,7 @@ def _mock_open_capture(
     height=1080,
     fps=30.0,
     read_frames=None,
+    read_interval: float = 0.0,
 ):
     cap = capture_cls.return_value
     cap.isOpened.return_value = opened
@@ -97,7 +99,18 @@ def _mock_open_capture(
     if read_frames is None:
         image = np.zeros((height, width, 3), dtype=np.uint8)
         read_frames = [(True, image)]
-    cap.read.side_effect = read_frames
+
+    frames_iter = iter(list(read_frames))
+
+    def read():
+        if read_interval > 0:
+            time.sleep(read_interval)
+        try:
+            return next(frames_iter)
+        except StopIteration:
+            return False, None
+
+    cap.read.side_effect = read
     return cap
 
 
@@ -163,23 +176,33 @@ class TestVideoInputStream:
     def test_processing_fps_caps_output_rate(self):
         image = np.zeros((240, 320, 3), dtype=np.uint8)
         with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:
+            # Pace the mock capture like a real camera so throttling sees
+            # wall-clock gaps instead of an instant end-of-stream burst.
             _mock_open_capture(
                 capture_cls,
                 width=320,
                 height=240,
                 fps=30.0,
-                read_frames=[(True, image)] * 5 + [(False, None)],
+                read_frames=[(True, image)] * 40 + [(False, None)],
+                read_interval=0.02,  # ~50 FPS producer
             )
-            source = VideoInputStream({"device": 0, "processing_fps": 10})
+            source = VideoInputStream(
+                {"device": 0, "processing_fps": 10, "reconnect_attempts": 0}
+            )
             assert source.fps == 10.0
 
-            times = iter([0.0, 0.05, 0.10, 0.20, 0.30])
-            with patch(
-                "amon.sources.stream.time.monotonic", side_effect=lambda: next(times)
-            ):
-                frames = list(source.frames())
+            frames = []
+            t0 = time.monotonic()
+            for frame in source.frames():
+                frames.append(frame)
+                if len(frames) >= 3:
+                    break
+            source.close()
+            elapsed = time.monotonic() - t0
             assert len(frames) == 3
             assert frames[1].timestamp == pytest.approx(0.1)
+            # 3 frames at 10 FPS need ~0.2s between first and third emit.
+            assert elapsed >= 0.18
 
     def test_reads_frames_from_device(self):
         image = np.zeros((240, 320, 3), dtype=np.uint8)
@@ -189,19 +212,99 @@ class TestVideoInputStream:
                 width=320,
                 height=240,
                 fps=25.0,
-                read_frames=[(True, image), (True, image), (True, image), (False, None)],
+                read_frames=[(True, image)] * 8 + [(False, None)],
+                read_interval=0.05,  # slower than min emit interval (1/25s)
             )
-            with VideoInputStream({"device": "/dev/video0"}) as source:
+            with VideoInputStream(
+                {"device": "/dev/video0", "reconnect_attempts": 0}
+            ) as source:
                 assert source.device == "/dev/video0"
-                times = iter([0.0, 0.05, 0.10, 0.15])
-                with patch(
-                    "amon.sources.stream.time.monotonic",
-                    side_effect=lambda: next(times),
-                ):
-                    frames = list(source.frames())
+                frames = []
+                for frame in source.frames():
+                    frames.append(frame)
+                    if len(frames) >= 2:
+                        break
             assert len(frames) == 2
             assert frames[1].timestamp == pytest.approx(1 / 25)
             capture_cls.return_value.set.assert_any_call(cv2.CAP_PROP_BUFFERSIZE, 1.0)
+
+    def test_frame_buffer_size_must_be_positive(self):
+        with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:
+            _mock_open_capture(capture_cls)
+            with pytest.raises(SourceError, match="frame_buffer_size"):
+                VideoInputStream({"device": 0, "frame_buffer_size": 0})
+
+    def test_live_stream_prefers_latest_frame_when_behind(self):
+        """Slow consumer must see recent frames, not an unbounded backlog."""
+        images = [np.full((16, 16, 3), i, dtype=np.uint8) for i in range(12)]
+        with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:
+            _mock_open_capture(
+                capture_cls,
+                width=16,
+                height=16,
+                fps=30.0,
+                read_frames=[(True, img) for img in images] + [(False, None)],
+            )
+            source = VideoInputStream(
+                {"device": 0, "frame_buffer_size": 1, "reconnect_attempts": 0}
+            )
+            # Let the reader collapse the burst into the single-slot buffer.
+            time.sleep(0.05)
+            frame = next(source.frames())
+            source.close()
+            assert int(frame.image[0, 0, 0]) >= 5
+
+    def test_reconnects_after_transient_read_failure(self):
+        image = np.zeros((16, 16, 3), dtype=np.uint8)
+        reads = [
+            (True, image),  # _detect_stream_size
+            (True, image),  # first delivered frame
+            (False, None),  # glitch → reconnect
+            (True, image),  # after reopen
+            (False, None),  # end after reconnect budget
+        ]
+        state = {"i": 0, "opens": 0}
+
+        with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:
+            cap = capture_cls.return_value
+            cap.isOpened.return_value = True
+
+            def get_prop(prop):
+                if prop == cv2.CAP_PROP_FRAME_WIDTH:
+                    return 16
+                if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+                    return 16
+                if prop == cv2.CAP_PROP_FPS:
+                    return 25.0
+                return 0
+
+            def read():
+                i = state["i"]
+                state["i"] = i + 1
+                if i < len(reads):
+                    return reads[i]
+                return False, None
+
+            cap.get.side_effect = get_prop
+            cap.read.side_effect = read
+
+            def open_capture(device):
+                state["opens"] += 1
+                return cap
+
+            with patch("amon.sources.stream._open_capture", side_effect=open_capture):
+                source = VideoInputStream(
+                    {
+                        "device": 0,
+                        "processing_fps": 1000,  # avoid throttle dropping the recovery frame
+                        "reconnect_attempts": 1,
+                        "reconnect_backoff_seconds": 0.01,
+                    }
+                )
+                frames = list(source.frames())
+                source.close()
+            assert len(frames) == 2
+            assert state["opens"] >= 2  # initial + reconnect
 
     def test_numeric_device_string(self):
         with patch("amon.sources.stream.cv2.VideoCapture") as capture_cls:

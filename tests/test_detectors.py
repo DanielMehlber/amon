@@ -164,6 +164,72 @@ class TestHudDetector:
             assert detector.metadata(aid).get("new") is True
             assert detector.regions(aid)
 
+    def test_new_overlay_keeps_id_when_text_mutates(self, scene):
+        """Appear → rewrite glyphs in place → still one frozen /new channel."""
+        from amon.synthetic import MUTATE_FLIP_AT
+
+        detector = self._fresh(scene, 89.0)
+        seen_ids = set()
+        for frame in make_frames(scene, 91.0, 96.0):
+            intensities = detector.process(frame)
+            new_aids = [aid for aid in intensities if aid.endswith("/new")]
+            seen_ids.update(new_aids)
+            if 91.2 <= frame.timestamp < MUTATE_FLIP_AT:
+                assert "hud/alert/new" in intensities
+            if frame.timestamp >= MUTATE_FLIP_AT + 0.2:
+                # Still the spawn ID — not hud/1000/new.
+                assert "hud/alert/new" in intensities
+                assert "hud/1000/new" not in intensities
+        assert seen_ids == {"hud/alert/new"}
+
+    def test_new_overlay_survives_numeric_steps_and_blink(self, scene):
+        """1000 → 2000 in steps, then blink — still a single hud/1000/new."""
+        from amon.synthetic import (
+            CYCLE_BLINK_START,
+            CYCLE_START,
+            cycle_hud_text,
+        )
+
+        detector = self._fresh(scene, CYCLE_START - 2.0)
+        seen_ids = set()
+        seen_on_frames = 0
+        for frame in make_frames(scene, CYCLE_START, CYCLE_BLINK_START + 3.5):
+            intensities = detector.process(frame)
+            new_aids = [aid for aid in intensities if aid.endswith("/new")]
+            seen_ids.update(new_aids)
+            if "hud/1000/new" in intensities:
+                seen_on_frames += 1
+            assert "hud/2000/new" not in intensities
+            if CYCLE_START <= frame.timestamp < CYCLE_BLINK_START:
+                assert cycle_hud_text(frame.timestamp) in {
+                    "1000",
+                    "1200",
+                    "1400",
+                    "1600",
+                    "1800",
+                    "2000",
+                }
+                assert "hud/1000/new" in intensities
+        assert seen_ids == {"hud/1000/new"}
+        # Blink at 2 Hz still yields many above-threshold frames overall.
+        assert seen_on_frames >= 40
+
+    def test_dynamic_new_thresholds_are_forgotten_after_ttl(self, scene):
+        """Pruned runtime tracks must not leave thresholds forever."""
+        from amon.synthetic import CYCLE_START
+
+        detector = HudDetector({"new_track_ttl_seconds": 0.5})
+        calibrate(detector, scene)
+        # Drive one cycle overlay briefly.
+        for frame in make_frames(scene, CYCLE_START, CYCLE_START + 1.0):
+            detector.process(frame)
+        assert any(aid.endswith("/new") for aid in detector.thresholds())
+        # After the schedule window + TTL, clean frames must forget the channel.
+        for frame in make_frames(scene, 108.0, 110.0):
+            detector.process(frame)
+        assert not any(aid.endswith("/new") for aid in detector.thresholds())
+        assert detector._new_tracks == []
+
     def test_blink_frequency_change_detected(self, scene):
         detector = self._fresh(scene, 41.0)
         blinker = self._blinker_id(detector)

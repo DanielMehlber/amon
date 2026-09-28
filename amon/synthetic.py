@@ -21,7 +21,7 @@ from amon.textocr import resolve_glyph_font
 
 WIDTH, HEIGHT = 320, 240
 FPS = 20.0
-DURATION = 94.0
+DURATION = 112.0
 
 #: Infrared landscape photograph shipped next to this module (package data).
 BACKGROUND_IMAGE = Path(__file__).resolve().with_name("infrared-landscape.png")
@@ -48,6 +48,10 @@ SCHEDULE: List[Tuple[str, float, float]] = [
     # After flicker linger (~2.5s): parallel changes on different HUD elements.
     ("hud_parallel_text", 87.0, 90.0),
     ("hud_parallel_position", 87.0, 90.0),
+    # Appear as ALERT, rewrite in place to 1000, then vanish — one /new event.
+    ("hud_new_mutate", 91.0, 96.0),
+    # Gap so mutate tracks TTL out, then: 1000→2000 steps, blink, vanish.
+    ("hud_new_cycle", 98.0, 107.0),
 ]
 
 #: Anomaly ID patterns the default detector set is expected to report per
@@ -66,6 +70,8 @@ EXPECTED_EVENTS = {
     "overlap_flicker_noise": "temporal/flicker",
     "hud_parallel_text": "hud/*/text",
     "hud_parallel_position": "hud/*/position",
+    "hud_new_mutate": "hud/alert/new",
+    "hud_new_cycle": "hud/1000/new",
 }
 
 #: How many distinct events are expected for a schedule key (default 1).
@@ -101,6 +107,39 @@ NEW_HUDS: Tuple[HudSpec, ...] = (
     HudSpec("alert", "ALERT", (200, 220), 1.0, 0.0),
     HudSpec("warn", "WARN", (200, 120), 1.0, 0.0),
 )
+
+#: Single overlay that rewrites its glyphs mid-lifetime (``hud_new_mutate``).
+MUTATE_HUD = HudSpec("mutate", "ALERT", (200, 160), 1.0, 0.0)
+MUTATE_FLIP_AT = 93.5  # seconds — switch ALERT → 1000 at the same org
+MUTATE_TEXT_AFTER = "1000"
+
+#: Runtime overlay: 1000 → 2000 in 1s steps, then blink, then vanish.
+#: Placed well away from MUTATE_HUD so centroid tracks cannot collide.
+CYCLE_HUD = HudSpec("cycle", "1000", (60, 140), 1.0, 0.0)
+CYCLE_START = 98.0
+CYCLE_STEP_SECONDS = 5.0  # time to climb 1000 → 2000
+CYCLE_BLINK_START = CYCLE_START + CYCLE_STEP_SECONDS  # 103.0
+CYCLE_BLINK_HZ = 2.0
+CYCLE_TEXT_START = 1000
+CYCLE_TEXT_END = 2000
+CYCLE_TEXT_STEP = 200  # 1000, 1200, …, 2000
+
+
+def cycle_hud_text(t: float) -> str:
+    """Numeric label for the cycle overlay at time ``t`` (frozen after steps)."""
+    elapsed = max(0.0, t - CYCLE_START)
+    step_index = min(
+        int((CYCLE_TEXT_END - CYCLE_TEXT_START) / CYCLE_TEXT_STEP),
+        int(elapsed),  # one step per second
+    )
+    return str(CYCLE_TEXT_START + step_index * CYCLE_TEXT_STEP)
+
+
+def cycle_hud_visible(t: float) -> bool:
+    """Visible during step phase; square-wave blink afterward until schedule end."""
+    if t < CYCLE_BLINK_START:
+        return True
+    return SyntheticVideo._square(t, CYCLE_BLINK_HZ)
 
 
 class SyntheticVideo:
@@ -212,6 +251,17 @@ class SyntheticVideo:
         if "hud_new" in active:
             for spec in NEW_HUDS:
                 self._draw_text(img, spec.text, spec.org, spec.scale)
+
+        if "hud_new_mutate" in active:
+            text = (
+                MUTATE_TEXT_AFTER if t >= MUTATE_FLIP_AT else MUTATE_HUD.text
+            )
+            self._draw_text(img, text, MUTATE_HUD.org, MUTATE_HUD.scale)
+
+        if "hud_new_cycle" in active and cycle_hud_visible(t):
+            self._draw_text(
+                img, cycle_hud_text(t), CYCLE_HUD.org, CYCLE_HUD.scale
+            )
 
         if "contrast" in active:
             mean = img.mean()

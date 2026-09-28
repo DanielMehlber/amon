@@ -108,6 +108,9 @@ class TemporalDetector(Detector):
             ),
         }
         annotations = {"temporal": {"baseline_std": self._baseline_std}}
+        # Drop calibration samples — they are not needed in detection mode.
+        self._samples = {NOISE: [], FLICKER: []}
+        self._std_samples = []
         return CalibrationResult(thresholds=thresholds, annotations=annotations)
 
     def _detect(self, frame: Frame) -> Dict[str, float]:

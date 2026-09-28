@@ -6,7 +6,9 @@ capture cards, webcams.  Prefer a numeric ``device`` index (``0``, ``1``, …)
 as ``/dev/video0`` are accepted where the OS exposes them (typically Linux).
 
 Native resolution and frame rate are detected automatically.  Optional
-``processing_fps`` throttles how many frames reach the pipeline.  Geometric
+``processing_fps`` throttles how many frames reach the pipeline.  A dedicated
+reader thread keeps a small :class:`~amon.sources.frame_buffer.DroppingFrameBuffer`
+so a slow pipeline drops *old* frames instead of growing a backlog.  Geometric
 and photometric transforms (scale, rotate, brightness, contrast) live in the
 top-level ``preprocessing`` config — see :mod:`amon.preprocess`.
 """
@@ -22,6 +24,7 @@ import cv2
 
 from amon.model import Frame
 from amon.sources import SourceError, VideoSource
+from amon.sources.frame_buffer import DroppingFrameBuffer, OverloadMonitor
 
 log = logging.getLogger("amon.sources.stream")
 
@@ -144,6 +147,13 @@ class VideoInputStream(VideoSource):
       (e.g. ``"MJPG"``).  Ignored by backends that do not support it.
     - ``capture_buffer_size`` (default ``1``): driver buffer depth when
       supported; ``1`` minimises latency.
+    - ``frame_buffer_size`` (default ``1``): software queue between the
+      capture thread and the pipeline.  When full, the oldest frame is
+      dropped so the session stays near real time instead of growing RAM.
+    - ``reconnect_attempts`` (default ``10``): how many reopen tries after
+      consecutive failed reads before the stream gives up.
+    - ``reconnect_backoff_seconds`` (default ``1.0``): delay between reopen
+      attempts (grows mildly with each try, capped at 30s).
 
     Rate limiting (optional)
     ------------------------
@@ -164,10 +174,12 @@ class VideoInputStream(VideoSource):
         self._capture = _open_capture(self._device)
         if not self._capture.isOpened():
             self._raise_device_unavailable()
+        self._frame_buffer: Optional[DroppingFrameBuffer] = None
+        self._closed = False
 
         # Best-effort: some backends ignore BUFFERSIZE / FOURCC; that is fine.
-        buffer_size = self.config.get("capture_buffer_size", 1)
-        self._capture.set(cv2.CAP_PROP_BUFFERSIZE, float(buffer_size))
+        self._driver_buffer_size = self.config.get("capture_buffer_size", 1)
+        self._capture.set(cv2.CAP_PROP_BUFFERSIZE, float(self._driver_buffer_size))
 
         fourcc = self.config.get("capture_fourcc")
         if fourcc:
@@ -175,9 +187,12 @@ class VideoInputStream(VideoSource):
                 raise SourceError(
                     f"capture_fourcc must be four characters, got {fourcc!r}"
                 )
+            self._capture_fourcc = fourcc
             self._capture.set(
                 cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc)
             )
+        else:
+            self._capture_fourcc = None
 
         self._native_size = _detect_stream_size(self._capture)
         self._native_fps = _detect_stream_fps(self._capture)
@@ -194,19 +209,36 @@ class VideoInputStream(VideoSource):
         if self._output_fps <= 0:
             raise SourceError("processing_fps must be positive")
 
+        frame_buffer_size = int(self.config.get("frame_buffer_size", 1))
+        if frame_buffer_size < 1:
+            raise SourceError("frame_buffer_size must be >= 1")
+        self._frame_buffer_size = frame_buffer_size
+        self._reconnect_attempts = max(
+            0, int(self.config.get("reconnect_attempts", 10))
+        )
+        self._reconnect_backoff = float(
+            self.config.get("reconnect_backoff_seconds", 1.0)
+        )
+        if self._reconnect_backoff < 0:
+            raise SourceError("reconnect_backoff_seconds must be >= 0")
+        self._reconnect_attempts_used = 0
+
         backend = ""
         try:
             backend = self._capture.getBackendName()
         except Exception:
             pass
         log.info(
-            "Video input on %r (%s): native %dx%d @ %.2f fps → pipeline @ %.2f fps",
+            "Video input on %r (%s): native %dx%d @ %.2f fps → pipeline @ %.2f fps "
+            "(frame_buffer_size=%d, reconnect_attempts=%d)",
             self._device,
             backend or "unknown-backend",
             self._native_size[0],
             self._native_size[1],
             self._native_fps,
             self._output_fps,
+            self._frame_buffer_size,
+            self._reconnect_attempts,
         )
 
     def _raise_device_unavailable(self) -> None:
@@ -235,27 +267,143 @@ class VideoInputStream(VideoSource):
     def device(self) -> Device:
         return self._device
 
+    def _apply_capture_options(self, capture: cv2.VideoCapture) -> None:
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, float(self._driver_buffer_size))
+        if self._capture_fourcc:
+            capture.set(
+                cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self._capture_fourcc)
+            )
+
+    def _interruptible_sleep(self, seconds: float) -> None:
+        """Sleep in short slices so ``close()`` can abort a reconnect wait."""
+        deadline = time.monotonic() + max(0.0, seconds)
+        while not self._closed:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.1, remaining))
+
+    def _reopen_capture(self) -> bool:
+        """Release and reopen the device.  Returns True on success."""
+        try:
+            self._capture.release()
+        except Exception:
+            pass
+        capture = _open_capture(self._device)
+        if not capture.isOpened():
+            log.warning("reconnect: cannot reopen capture device %r", self._device)
+            self._capture = capture
+            return False
+        self._apply_capture_options(capture)
+        self._capture = capture
+        log.info("reconnect: capture device %r reopened", self._device)
+        return True
+
+    def _read_with_reconnect(self):
+        """Read one frame; reopen the device after transient failures.
+
+        Returns ``(False, None)`` only when the source is closed or reconnect
+        attempts are exhausted — so a USB glitch does not end a multi-day run.
+        A successful frame resets the per-outage reconnect budget.
+        """
+        fail_streak = 0
+        while not self._closed:
+            ok, image = self._capture.read()
+            if ok and image is not None:
+                self._reconnect_attempts_used = 0
+                return True, image
+
+            fail_streak += 1
+            if self._closed:
+                break
+            if self._reconnect_attempts <= 0:
+                return False, None
+
+            if self._reconnect_attempts_used >= self._reconnect_attempts:
+                log.error(
+                    "capture device %r failed after %d reconnect attempts — ending stream",
+                    self._device,
+                    self._reconnect_attempts_used,
+                )
+                return False, None
+
+            self._reconnect_attempts_used += 1
+            backoff = min(
+                30.0, self._reconnect_backoff * self._reconnect_attempts_used
+            )
+            log.warning(
+                "capture read failed on %r (streak=%d) — reconnecting in %.1fs "
+                "(attempt %d/%d)",
+                self._device,
+                fail_streak,
+                backoff,
+                self._reconnect_attempts_used,
+                self._reconnect_attempts,
+            )
+            self._interruptible_sleep(backoff)
+            if self._closed:
+                break
+            self._reopen_capture()
+        return False, None
+
     def frames(self) -> Iterator[Frame]:
+        """Yield frames from a dropping prefetch buffer.
+
+        A reader thread keeps draining the device so a slow pipeline never
+        accumulates an unbounded backlog — oldest buffered frames are discarded
+        when newer ones arrive.  Frequent drops trigger an overload warning.
+        Transient capture failures trigger reopen attempts before ending.
+        """
+        buffer = DroppingFrameBuffer(
+            self._read_with_reconnect,
+            maxsize=self._frame_buffer_size,
+            name=f"device-{self._device}",
+        )
+        self._frame_buffer = buffer
+        buffer.start()
+        overload = OverloadMonitor(
+            width=self._native_size[0],
+            height=self._native_size[1],
+            source_fps=self._native_fps,
+        )
         index = 0
         min_interval = 1.0 / self._output_fps if self._output_fps > 0 else 0.0
         last_emit: Optional[float] = None
+        try:
+            while True:
+                item = buffer.get(timeout=1.0)
+                if item is None:
+                    if buffer.ended:
+                        return
+                    continue
+                image, _captured_at = item
 
-        while True:
-            ok, image = self._capture.read()
-            if not ok:
-                return
-
-            now = time.monotonic()
-            if (
-                min_interval > 0
-                and last_emit is not None
-                and (now - last_emit) < min_interval
-            ):
-                continue
-            last_emit = now
-
-            yield Frame(index=index, timestamp=index / self._output_fps, image=image)
-            index += 1
+                now = time.monotonic()
+                if (
+                    min_interval > 0
+                    and last_emit is not None
+                    and (now - last_emit) < min_interval
+                ):
+                    # Intentional throttle: frame already drained from the
+                    # device so we stay near real time without counting this
+                    # as pipeline overload.  Sleep the remaining gap so a full
+                    # buffer cannot busy-spin the consumer thread.
+                    time.sleep(min_interval - (now - last_emit))
+                    continue
+                last_emit = now
+                overload.note_emit(buffer.dropped)
+                yield Frame(
+                    index=index, timestamp=index / self._output_fps, image=image
+                )
+                index += 1
+        finally:
+            buffer.close()
+            if self._frame_buffer is buffer:
+                self._frame_buffer = None
 
     def close(self) -> None:
+        self._closed = True
+        if self._frame_buffer is not None:
+            self._frame_buffer.close()
+            self._frame_buffer = None
         self._capture.release()

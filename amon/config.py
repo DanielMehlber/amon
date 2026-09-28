@@ -54,6 +54,9 @@ DEFAULTS: dict = {
         "max_clip_seconds": 6.0,  # long events are clipped to this length
         "lead_seconds": 1.0,  # context recorded before the event start
         "gif_max_fps": 10.0,
+        # Bound background jobs so a stalled worker cannot OOM a long run.
+        # Each event may carry evidence frames — keep this small (default 8).
+        "queue_maxsize": 8,
     },
     # Applied to every frame after the video source (any source type).
     "preprocessing": {
@@ -80,6 +83,8 @@ DEFAULTS: dict = {
         "console_level": "INFO",   # anomalies / session lifecycle on stderr
         "file_level": "DEBUG",     # full detection trace in the log file
         "dir": "logs",
+        "max_bytes": 50 * 1024 * 1024,  # rotate before multi-day DEBUG fills disk
+        "backup_count": 5,
     },
 }
 

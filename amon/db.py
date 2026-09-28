@@ -69,6 +69,10 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.path))
         self._conn.row_factory = sqlite3.Row
+        # WAL keeps writers from blocking readers and bounds journal growth
+        # better than delete-mode for long-lived monitoring sessions.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
         self._migrate()
 

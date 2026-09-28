@@ -67,10 +67,13 @@ class SuppressionRules:
     """Evaluates the exclusion hierarchy from the aggregation config."""
 
     def __init__(self, rules: Dict[str, List[str]]):
-        self._rules = [
-            (*_compile_pattern(sup), targets)
-            for sup, targets in (rules or {}).items()
-        ]
+        self._rules = []
+        for sup, targets in (rules or {}).items():
+            sup_re, hash_count = _compile_pattern(sup)
+            compiled_targets = [
+                (target, *_compile_pattern(target)) for target in targets
+            ]
+            self._rules.append((sup_re, hash_count, compiled_targets))
 
     def suppressed(self, anomaly_id: str, active: Iterable[str]) -> bool:
         """True if ``anomaly_id`` is suppressed by any *other* active anomaly."""
@@ -88,11 +91,11 @@ class SuppressionRules:
                 if not match:
                     continue
                 captures = match.groups()
-                for target in targets:
-                    if hash_count and target.count("#") == hash_count:
+                for target, target_re, target_hashes in targets:
+                    if hash_count and target_hashes == hash_count:
                         if _substitute_hashes(target, captures) == anomaly_id:
                             return suppressor
-                    elif _compile_pattern(target)[0].match(anomaly_id):
+                    elif target_re.match(anomaly_id):
                         return suppressor
         return None
 
@@ -147,6 +150,13 @@ class EventAggregator:
         for aid in raw:
             start, last = self._streaks.get(aid, (t, t))
             self._streaks[aid] = (t if t - last > self.cooldown else start, t)
+        # Drop streak rows that can no longer affect linger so the map cannot
+        # grow without bound over multi-day runs with many dynamic IDs.
+        streak_ttl = self.linger + self.cooldown
+        for aid in [
+            aid for aid, (_, last) in self._streaks.items() if t - last > streak_ttl
+        ]:
+            del self._streaks[aid]
         # Suppression is instantaneous for currently raw anomalies.  On top,
         # *sustained* suppressors keep their grip for a short linger after
         # subsiding: windowed metrics of suppressed detectors (e.g. HUD blink
@@ -195,6 +205,20 @@ class EventAggregator:
         opened: List[str] = []
         closed: List[AnomalyEvent] = []
         discarded: List[str] = []
+        # Dynamic channels (e.g. hud/<slug>/new) may vanish from readings when
+        # the overlay disappears — treat missing open IDs as intensity 0 so
+        # cooldown can close them instead of leaving them stuck until flush.
+        absent_open = [
+            aid for aid in self._open if aid not in readings
+        ]
+        for aid in absent_open:
+            state = self._open[aid]
+            readings[aid] = Reading(
+                intensity=0.0,
+                threshold=state.event.threshold,
+                detector=state.event.detector,
+            )
+
         for aid, reading in readings.items():
             state = self._open.get(aid)
             if aid in firing:

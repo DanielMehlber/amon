@@ -8,6 +8,8 @@ logging:
   console_level: INFO    # anomalies OPEN/CLOSE/FINALIZE on stderr
   file_level: DEBUG      # full intensity/suppression trace in the log file
   dir: logs              # per-run files: <dir>/<session_id>.log
+  max_bytes: 52428800    # rotate each file at 50 MiB (multi-day runs)
+  backup_count: 5        # keep this many rotated backups per session
 ```
 
 Legacy ``logging.level`` still works as a fallback for both sinks when the
@@ -20,6 +22,7 @@ messages are written to ``<dir>/<session_id>.log``.
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -27,6 +30,10 @@ _FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s %(name)s | %(message)s"
 _DATEFMT = "%Y-%m-%d %H:%M:%S"
 _SESSION_HANDLER_ATTR = "_amon_session_file"
 _CONSOLE_HANDLER_ATTR = "_amon_console"
+
+#: Defaults keep a multi-day DEBUG trace from filling the disk unnoticed.
+_DEFAULT_MAX_BYTES = 50 * 1024 * 1024
+_DEFAULT_BACKUP_COUNT = 5
 
 
 def _level(name: str, default: str = "INFO") -> int:
@@ -67,12 +74,14 @@ def configure_logging(config: Optional[dict] = None) -> None:
 
 
 def attach_session_log(config: Optional[dict], session_id: str) -> Path:
-    """Attach a file handler named after the run; returns the log path."""
+    """Attach a rotating file handler named after the run; returns the log path."""
     cfg = (config or {}).get("logging") or {}
     console_level, file_level = _sink_levels(cfg)
     log_dir = Path(cfg.get("dir", "logs"))
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"{session_id}.log"
+    max_bytes = int(cfg.get("max_bytes", _DEFAULT_MAX_BYTES))
+    backup_count = int(cfg.get("backup_count", _DEFAULT_BACKUP_COUNT))
 
     amon = logging.getLogger("amon")
     amon.setLevel(min(console_level, file_level))
@@ -82,7 +91,12 @@ def attach_session_log(config: Optional[dict], session_id: str) -> Path:
             amon.removeHandler(handler)
             handler.close()
 
-    file_handler = logging.FileHandler(path, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        path,
+        maxBytes=max(max_bytes, 1024),
+        backupCount=max(backup_count, 0),
+        encoding="utf-8",
+    )
     file_handler.setLevel(file_level)
     file_handler.setFormatter(logging.Formatter(_FORMAT, datefmt=_DATEFMT))
     setattr(file_handler, _SESSION_HANDLER_ATTR, True)
@@ -91,9 +105,12 @@ def attach_session_log(config: Optional[dict], session_id: str) -> Path:
     amon.info("diagnostic log: %s", path.resolve())
     amon.debug(
         "diagnostic log levels: console=%s file=%s "
-        "(file DEBUG traces aggregation: OPEN/CLOSE/DISCARD/SUPPRESSED)",
+        "(file DEBUG traces aggregation: OPEN/CLOSE/DISCARD/SUPPRESSED; "
+        "rotates at %d bytes, %d backups)",
         logging.getLevelName(console_level),
         logging.getLevelName(file_level),
+        max_bytes,
+        backup_count,
     )
     return path
 

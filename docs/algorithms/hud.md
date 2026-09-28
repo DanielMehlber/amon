@@ -64,18 +64,23 @@ so brief gaps during a normal blink do not false-trigger.
 
 **Idea:** Calibration records a *known cover* — each element’s box plus the
 search margin. Any later bright blob **outside** that cover that OCR reads
-as non-empty text is an unexpected overlay.
+as non-empty text (letters or digits) is an unexpected overlay.
 
-**Anomaly ID:** `hud/<slug>/new` — one channel (and one event) per appearing
-overlay. Intensity is `1.0` while that overlay is visible; the threshold
-defaults to `new_floor` ≈ 0.5. The slug is derived from the OCR text
-(e.g. `ALERT` → `hud/alert/new`).
+**Anomaly ID:** `hud/<slug>/new` — named once from the **first** OCR reading
+(e.g. `ALERT` → `hud/alert/new`, `1000` → `hud/1000/new`). Continuity across
+frames is by **centroid** (`new_match_distance_px`): if the overlay rewrites
+its glyphs, blinks, or resizes in place, the same channel stays open until
+the blob disappears. Runtime overlays never emit calibrated-style
+`text` / `position` / `size` / `blink` anomalies. Tracks older than
+`new_track_ttl_seconds` are pruned and their dynamic thresholds dropped so
+multi-day runs cannot accumulate one map entry per historical overlay.
 
-Bright non-text blobs (glare, icons without readable glyphs) are ignored.
+Bright non-text blobs (glare, icons without readable glyphs) are ignored
+at spawn; an already-tracked blob may keep its ID briefly even if OCR
+fails for a frame.
 
 ## Per-element anomaly IDs
 
-Each HUD element gets its own namespace, e.g. `hud/cam01/text`,
-`hud/rec/blink`. Text and position on the same physical label are
-separate channels — operators can see *what* changed. Unexpected overlays
-also use per-element IDs (`hud/alert/new`) rather than a shared bucket.
+Each **calibrated** HUD element gets its own namespace, e.g. `hud/cam01/text`,
+`hud/rec/blink`. Unexpected overlays use position-tracked `/new` channels
+frozen at first sighting.

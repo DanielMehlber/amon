@@ -82,10 +82,14 @@ class Pipeline:
         media_cfg = config["media"]
         self._lead = float(media_cfg["lead_seconds"])
         self._max_clip = float(media_cfg["max_clip_seconds"])
+        self._gif_fps = float(media_cfg.get("gif_max_fps", 10.0))
         self._detector_of: Dict[str, Detector] = {}
         self._clips: Dict[str, List[Tuple[float, np.ndarray]]] = {}
         self._enrichment: Dict[str, Tuple[dict, list]] = {}
         self._last_open_sync = 0.0
+        self._max_clip_frames: int = 0  # set once fps is known in run()
+        self._clip_interval = 0.0
+        self._worker_check_counter = 0
 
     def run(self, max_frames: Optional[int] = None, stop=None) -> str:
         """Process the stream until it ends; returns the session ID."""
@@ -94,6 +98,10 @@ class Pipeline:
         ring: deque = deque(
             maxlen=int(max(self._lead, CALIBRATION_CLIP_SECONDS) * fps) + 4
         )
+        # Cap evidence at GIF rate — full-rate HD frames in the queue OOMs fast.
+        clip_fps = min(fps, max(self._gif_fps, 1e-6))
+        self._clip_interval = 1.0 / clip_fps
+        self._max_clip_frames = int((self._lead + self._max_clip) * clip_fps) + 4
 
         db = Database(self.db_path)
         existing = {row["id"] for row in db.list_sessions()}
@@ -132,6 +140,7 @@ class Pipeline:
                     break
                 if max_frames is not None and frame.index >= max_frames:
                     break
+                self._ensure_worker_alive(worker)
                 frame = self._preprocess(frame)
                 last_t = frame.timestamp
                 ring.append((frame.timestamp, frame.image))
@@ -155,6 +164,19 @@ class Pipeline:
             db.close()
             log.info("session %s finished", self.session_id)
         return self.session_id
+
+    def _ensure_worker_alive(self, worker: BackgroundWorker) -> None:
+        """Fail fast if the background process died (otherwise the queue fills)."""
+        self._worker_check_counter += 1
+        # Check every ~2s at 20 FPS without paying is_alive every frame.
+        if self._worker_check_counter % 40 != 0:
+            return
+        is_alive = getattr(worker, "is_alive", None)
+        if callable(is_alive) and not is_alive():
+            raise RuntimeError(
+                "background worker process died — aborting to avoid unbounded "
+                "queue growth"
+            )
 
     # --- calibration hand-off ------------------------------------------------
     def _finish_calibration(
@@ -214,6 +236,7 @@ class Pipeline:
         for anomaly_id in discarded:  # too short to report - free capture state
             self._clips.pop(anomaly_id, None)
             self._enrichment.pop(anomaly_id, None)
+            self._forget_dynamic_channel(anomaly_id)
             worker.submit_discard(anomaly_id)
 
         for anomaly_id in opened:
@@ -222,9 +245,12 @@ class Pipeline:
                 detector.metadata(anomaly_id),
                 [list(box) for box in detector.regions(anomaly_id)],
             )
-            # Start the evidence clip with lead-in frames from the ring buffer.
+            # Start the evidence clip with lead-in frames from the ring buffer,
+            # already subsampled to GIF rate so queue payloads stay small.
             lead_start = frame.timestamp - self._lead
-            self._clips[anomaly_id] = [(t, img) for t, img in ring if t >= lead_start]
+            self._clips[anomaly_id] = self._subsample_clip(
+                [(t, img) for t, img in ring if t >= lead_start]
+            )
             self._publish_open(anomaly_id, worker)
 
         if frame.timestamp - self._last_open_sync >= OPEN_SYNC_INTERVAL_SECONDS:
@@ -236,13 +262,28 @@ class Pipeline:
         for anomaly_id, clip in self._clips.items():
             if (
                 clip
+                and len(clip) < self._max_clip_frames
                 and frame.timestamp <= clip[0][0] + self._lead + self._max_clip
-                and clip[-1][0] < frame.timestamp
+                and frame.timestamp - clip[-1][0] >= self._clip_interval - 1e-9
             ):
                 clip.append((frame.timestamp, frame.image))
 
         for event in closed:
             self._finalize_event(event, worker, fps)
+
+    def _subsample_clip(
+        self, frames: List[Tuple[float, np.ndarray]]
+    ) -> List[Tuple[float, np.ndarray]]:
+        """Keep roughly ``gif_max_fps`` evidence frames from a dense ring slice."""
+        if not frames or self._clip_interval <= 0:
+            return list(frames)
+        out: List[Tuple[float, np.ndarray]] = [frames[0]]
+        for timed in frames[1:]:
+            if timed[0] - out[-1][0] >= self._clip_interval - 1e-9:
+                out.append(timed)
+            if len(out) >= self._max_clip_frames:
+                break
+        return out
 
     def _publish_open(self, anomaly_id: str, worker: BackgroundWorker) -> None:
         """Persist / refresh an ongoing event so live reports can show it."""
@@ -255,6 +296,11 @@ class Pipeline:
         event.regions = regions
         worker.submit_open(event)
 
+    def _forget_dynamic_channel(self, anomaly_id: str) -> None:
+        """Drop pipeline maps for runtime-only IDs after the event ends."""
+        if anomaly_id.endswith("/new"):
+            self._detector_of.pop(anomaly_id, None)
+
     def _finalize_event(
         self, event: AnomalyEvent, worker: BackgroundWorker, fps: float
     ) -> None:
@@ -263,6 +309,7 @@ class Pipeline:
         event.regions = regions
         clip = self._clips.pop(event.anomaly_id, [])
         worker.submit_event(event, clip, fps)
+        self._forget_dynamic_channel(event.anomaly_id)
         log.info(
             "event %s: %.1fs-%.1fs (%.1fs, peak %.2f)",
             event.anomaly_id,

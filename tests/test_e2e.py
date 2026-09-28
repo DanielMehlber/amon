@@ -62,6 +62,41 @@ class TestEventDetection:
         assert ids[0] != ids[1]
         assert all(aid.endswith("/new") for aid in ids)
 
+    def test_hud_new_mutate_keeps_spawn_id(self, db_events):
+        """Content rewrite mid-lifetime must not open hud/1000/new in that window."""
+        _, _, events = db_events
+        hits = [
+            e
+            for e in events
+            if e["anomaly_id"].endswith("/new")
+            and abs(e["start"] - 91.0) <= START_TOLERANCE
+        ]
+        assert len(hits) == 1
+        event = hits[0]
+        assert event["anomaly_id"] == "hud/alert/new"
+        assert event["end"] - event["start"] >= 3.0  # spans ALERT and 1000 phases
+        assert not any(
+            e["anomaly_id"] == "hud/1000/new"
+            and abs(e["start"] - 91.0) <= START_TOLERANCE
+            for e in events
+        )
+
+    def test_hud_new_cycle_keeps_spawn_id_through_steps_and_blink(self, db_events):
+        """Stepped 1000→2000 plus blink must yield one hud/1000/new event."""
+        _, _, events = db_events
+        hits = [
+            e
+            for e in events
+            if e["anomaly_id"].endswith("/new")
+            and abs(e["start"] - 98.0) <= START_TOLERANCE
+        ]
+        assert len(hits) == 1
+        event = hits[0]
+        assert event["anomaly_id"] == "hud/1000/new"
+        # Steps (5s) + blink (~4s) — allow cooldown slack on the end.
+        assert event["end"] - event["start"] >= 6.0
+        assert not any(e["anomaly_id"] == "hud/2000/new" for e in events)
+
     def test_parallel_hud_changes_are_differentiated(self, db_events):
         _, _, events = db_events
         text_hits = [
