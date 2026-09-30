@@ -364,7 +364,9 @@ def _hud_element_card(element: dict) -> pn.Column:
     )
 
 
-def calibration_tab(calibration: dict) -> pn.Column:
+def calibration_tab(
+    calibration: dict, session: Optional[dict] = None
+) -> pn.Column:
     """Calibration review: media, HUD cards, feature-point count, thresholds."""
     if calibration is None:
         return pn.Column(pn.pane.Markdown("*No calibration recorded yet.*"))
@@ -383,6 +385,14 @@ def calibration_tab(calibration: dict) -> pn.Column:
                 },
             )
         )
+        meta = _calibration_frame_meta(calibration, session)
+        if meta:
+            parts.append(
+                pn.pane.Markdown(
+                    meta,
+                    styles={"text-align": "center", "margin-top": "4px"},
+                )
+            )
 
     elements = calibration["annotations"].get("hud_elements", [])
     if elements:
@@ -399,6 +409,23 @@ def calibration_tab(calibration: dict) -> pn.Column:
     parts.append(pn.pane.Markdown("#### Calibrated thresholds"))
     parts.append(_json_block(calibration["thresholds"]))
     return pn.Column(*parts, sizing_mode="stretch_width")
+
+
+def _calibration_frame_meta(
+    calibration: dict, session: Optional[dict] = None
+) -> str:
+    """Markdown line with frame size and FPS for under the calibration image."""
+    frame = (calibration.get("annotations") or {}).get("frame") or {}
+    session = session or {}
+    width = frame.get("width")
+    height = frame.get("height")
+    fps = frame.get("fps", session.get("fps"))
+    bits: List[str] = []
+    if width and height:
+        bits.append(f"**Frame size:** {int(width)}×{int(height)} px")
+    if fps is not None and fps != "":
+        bits.append(f"**FPS:** {float(fps):g}")
+    return " · ".join(bits)
 
 
 def export_tab(config: dict, session_id: str) -> pn.Column:
@@ -460,7 +487,7 @@ def session_view(config: dict, session_id: str) -> pn.Column:
                 else pn.pane.Markdown("*No anomalies recorded.*")
             ),
         ),
-        ("Calibration", calibration_tab(calibration)),
+        ("Calibration", calibration_tab(calibration, session)),
         ("Export", export_tab(config, session_id)),
         tabs_location="above",
         sizing_mode="stretch_width",

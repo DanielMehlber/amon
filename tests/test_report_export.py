@@ -30,6 +30,9 @@ class TestHtmlExport:
         assert "data:image" in html
         assert "Started:" in html
         assert session["id"] in html
+        assert "Frame size:" in html
+        assert "320×240" in html
+        assert "FPS:" in html
         assert Path(out).stat().st_size > 10_000
         assert "<script" not in html.lower()
 
@@ -68,6 +71,23 @@ class TestCsvExport:
 
 
 class TestReportUi:
+    def test_calibration_frame_meta(self):
+        from amon.report import _calibration_frame_meta
+
+        meta = _calibration_frame_meta(
+            {"annotations": {"frame": {"width": 640, "height": 360, "fps": 25.0}}},
+            {"fps": 30.0},
+        )
+        assert "640×360" in meta
+        assert "25" in meta
+
+        meta_fallback = _calibration_frame_meta(
+            {"annotations": {}},
+            {"fps": 30.0},
+        )
+        assert "Frame size" not in meta_fallback
+        assert "30" in meta_fallback
+
     def test_build_app_lists_sessions(self, session_data):
         from amon.report import build_app
 

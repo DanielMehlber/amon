@@ -229,6 +229,10 @@ class TestSessionAndCalibration:
 
         annotations = calibration["annotations"]
         assert len(annotations["keypoints"]) >= 20
+        frame = annotations["frame"]
+        assert frame["width"] == 320
+        assert frame["height"] == 240
+        assert frame["fps"] == pytest.approx(20.0)
         elements = annotations["hud_elements"]
         assert len(elements) == 4
         blink_rates = sorted(e["blink_hz"] for e in elements)

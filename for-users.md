@@ -130,10 +130,11 @@ logging:
 Overrides: `python -m amon monitor test.yaml --log-level DEBUG` sets the
 **file** level (use `--console-log-level` for the terminal).
 
-At console `INFO` you only see session start/finish, calibration complete, and
-each detected anomaly (`event <id>: start-end (duration, peak)`). File `DEBUG`
-traces aggregation: OPEN / CLOSE / DISCARD / SUPPRESSED (and why a crossing
-did not become a reported anomaly). Quiet frames are not logged.
+At console `INFO` you only see session start/finish, the processed frame size
+and FPS (after preprocessing), calibration complete, and each detected anomaly
+(`event <id>: start-end (duration, peak)`). File `DEBUG` traces aggregation:
+OPEN / CLOSE / DISCARD / SUPPRESSED (and why a crossing did not become a
+reported anomaly). Quiet frames are not logged.
 
 ### Preprocessing
 
@@ -197,7 +198,8 @@ automatically).  You can:
 - open an event to see its GIF, intensity plot with the calibrated
   threshold line, and detector metadata,
 - review the calibration: an annotated GIF marks tracked feature points,
-  HUD elements, their recognised text and blink frequencies.
+  HUD elements, their recognised text and blink frequencies; frame size and
+  FPS are shown under the calibration image,
 
 ## Exporting reports
 

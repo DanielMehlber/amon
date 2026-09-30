@@ -91,6 +91,7 @@ class Pipeline:
         self._max_clip_frames: int = 0  # set once fps is known in run()
         self._clip_interval = 0.0
         self._worker_check_counter = 0
+        self._frame_size: Optional[Tuple[int, int]] = None  # (width, height)
 
     def run(self, max_frames: Optional[int] = None, stop=None) -> str:
         """Process the stream until it ends; returns the session ID."""
@@ -143,6 +144,17 @@ class Pipeline:
                     break
                 self._ensure_worker_alive(worker)
                 frame = self._preprocess(frame)
+                if self._frame_size is None:
+                    height, width = frame.image.shape[:2]
+                    self._frame_size = (width, height)
+                    scale = self.config.get("preprocessing", {}).get("scale", 100)
+                    log.info(
+                        "frame size %dx%d @ %.2f fps (preprocessing scale %s%%)",
+                        width,
+                        height,
+                        fps,
+                        scale,
+                    )
                 last_t = frame.timestamp
                 ring.append((frame.timestamp, frame.image))
 
@@ -191,6 +203,21 @@ class Pipeline:
             annotations.update(result.annotations)
             for anomaly_id in result.thresholds:
                 self._detector_of[anomaly_id] = detector
+        if self._frame_size is not None:
+            width, height = self._frame_size
+            scale = self.config.get("preprocessing", {}).get("scale", 100)
+            annotations["frame"] = {
+                "width": int(width),
+                "height": int(height),
+                "fps": float(fps),
+                "scale_percent": float(scale if scale is not None else 100),
+            }
+            log.info(
+                "calibration frame geometry: %dx%d @ %.2f fps",
+                width,
+                height,
+                fps,
+            )
         clip = [(t, img) for t, img in ring][-int(CALIBRATION_CLIP_SECONDS * fps) :]
         worker.submit_calibration(thresholds, annotations, clip, fps)
         log.info("calibration complete: %d anomalies armed", len(self._detector_of))

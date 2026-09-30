@@ -117,6 +117,19 @@ def write_html_report(
             uri = _media_data_uri(calibration["media"])
             if uri:
                 parts.append(f"<p><img src='{uri}' alt='Calibration review'></p>")
+        frame = (calibration.get("annotations") or {}).get("frame") or {}
+        width = frame.get("width")
+        height = frame.get("height")
+        fps = frame.get("fps", session.get("fps"))
+        meta_bits = []
+        if width and height:
+            meta_bits.append(
+                f"<strong>Frame size:</strong> {int(width)}×{int(height)} px"
+            )
+        if fps is not None and fps != "":
+            meta_bits.append(f"<strong>FPS:</strong> {float(fps):g}")
+        if meta_bits:
+            parts.append("<p class='meta'>" + " · ".join(meta_bits) + "</p>")
         elements = calibration["annotations"].get("hud_elements", [])
         if elements:
             parts.append("<table><tr><th>HUD</th><th>Text</th><th>Blink (Hz)</th></tr>")
