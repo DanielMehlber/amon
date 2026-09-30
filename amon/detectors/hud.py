@@ -9,8 +9,9 @@ calibration the detector:
 2. Merges the union of all bright masks into element blobs (dilation +
    connected components), yielding one bounding box per HUD element;
 3. Reads each element's text from the maximum image using the offline
-   glyph matcher (the maximum image shows blinking
-   elements at full brightness) and derives a stable element ID from it;
+   glyph matcher (the maximum image shows blinking elements at full
+   brightness) and derives a stable element ID from it — readable OCR
+   → slug (e.g. ``cam01``); icons / unreadable crops → ``symbol-N``;
 4. Measures each element's baseline: centroid, box area, text and blink
    toggle rate (visibility changes per second).
 
@@ -41,7 +42,7 @@ import numpy as np
 
 from amon.detectors import Detector
 from amon.model import Box, CalibrationResult, Frame
-from amon.scale import REFERENCE_WIDTH_PX, of_width, of_width_float, of_width_sq
+from amon.scale import REFERENCE_WIDTH_PX, rel_width, rel_width_float, rel_width_sq
 from amon.stats import robust_threshold
 from amon.textocr import DEFAULT_MIN_MATCH_SCORE, levenshtein_norm, read_hud, slugify
 
@@ -96,32 +97,46 @@ class HudDetector(Detector):
     @classmethod
     def default_config(cls) -> dict:
         return {
-            "bright_threshold": 220,  # gray level separating HUD from scene
-            # Fractions of processed frame width (tuned as px @ 1200 → /1200).
-            "search_margin_of_width": 20 / _W,  # was 20 px
-            "blink_window_seconds": 2.0,  # sliding window for the toggle rate
-            "min_element_area_of_width_sq": 15 / _W2,  # was 15 px²
-            "min_glyph_height_of_width": 8 / _W,  # was 8 px
-            "max_glyph_height_of_width": 96 / _W,  # was 64 px; headroom for size anomalies
-            "max_glyph_width_of_width": 96 / _W,  # was 64 px
-            "min_glyph_area_of_width_sq": 20 / _W2,  # was 20 px²
-            # Reject forced letter matches below this correlation×aspect score
-            # (icons/dots/crosshairs); those overlays become symbol-1, …
-            "min_glyph_match_score": DEFAULT_MIN_MATCH_SCORE,
-            # TrueType under amon/fonts/ (or absolute path); default VCR OSD Mono
-            "glyph_font": "VCR_OSD_MONO_1.001.ttf",
-            "merge_kernel_of_width": 15 / _W,  # was 15 px (~1.25% of width)
-            "visible_fraction": 0.25,  # bright-pixel fraction counting as visible
-            "sigma_k": 8.0,
-            "text_floor": 0.3,  # min normalised text distance
-            "position_floor_of_width": 6.0 / _W,  # was 6 px
-            "size_floor": 0.25,  # min relative area change
-            "blink_floor": 2.0,  # min toggle-rate deviation (1/s)
-            "new_floor": 0.5,  # intensity when unexpected text is present
-            # Max centroid distance to keep a runtime /new track across frames.
-            "new_match_distance_of_width": 30.0 / _W,  # was 30 px
-            # Keep an unseen track this long so brief gaps reconnect to the same ID.
-            "new_track_ttl_seconds": 1.0,
+            "segmentation": {
+                "bright_threshold": 220,  # gray level separating HUD from scene
+                # Fractions of processed frame width (tuned as px @ 1200 → /1200).
+                "search_margin_rel": 20 / _W,  # was 20 px
+                "merge_kernel_rel": 15 / _W,  # was 15 px (~1.25% of width)
+                "min_element_area_rel_sq": 15 / _W2,  # was 15 px²
+                "visible_fraction": 0.25,  # bright-pixel fraction counting as visible
+            },
+            "ocr": {
+                "min_glyph_height_rel": 8 / _W,  # was 8 px
+                "max_glyph_height_rel": 96 / _W,  # was 64 px; headroom for size anomalies
+                "max_glyph_width_rel": 96 / _W,  # was 64 px
+                "min_glyph_area_rel_sq": 20 / _W2,  # was 20 px²
+                # Extra margin around bright-mask boxes when cropping for OCR so
+                # anti-aliased glyph edges (often < bright_threshold) are not cut
+                # off — S is especially fragile when the top rows are missing.
+                "glyph_crop_pad_rel": 6 / _W,  # was 6 px (~2 px @ 320)
+                # Reject forced letter matches below this correlation×aspect score
+                # (icons/dots/crosshairs); those overlays become symbol-1, …
+                "min_glyph_match_score": DEFAULT_MIN_MATCH_SCORE,
+                # TrueType under amon/fonts/ (or absolute path); default VCR OSD Mono
+                "glyph_font": "VCR_OSD_MONO_1.001.ttf",
+            },
+            "blink": {
+                "blink_window_seconds": 2.0,  # sliding window for the toggle rate
+            },
+            "thresholds": {
+                "sigma_k": 8.0,
+                "text_floor": 0.3,  # min normalised text distance
+                "position_floor_rel": 6.0 / _W,  # was 6 px
+                "size_floor": 0.25,  # min relative area change
+                "blink_floor": 2.0,  # min toggle-rate deviation (1/s)
+                "new_floor": 0.5,  # intensity when unexpected text is present
+            },
+            "new_overlays": {
+                # Max centroid distance to keep a runtime /new track across frames.
+                "new_match_distance_rel": 30.0 / _W,  # was 30 px
+                # Keep an unseen track this long so brief gaps reconnect to the same ID.
+                "new_track_ttl_seconds": 1.0,
+            },
             # Per-anomaly threshold multipliers (float also accepted).
             "tolerance": {
                 "text": 1.0,
@@ -150,7 +165,7 @@ class HudDetector(Detector):
         self._frame_width = int(image.shape[1])
 
     def _length_px(self, key: str, *, minimum: int = 1, round_up: bool = False) -> int:
-        return of_width(
+        return rel_width(
             self.config[key],
             self._frame_width,
             minimum=minimum,
@@ -158,10 +173,10 @@ class HudDetector(Detector):
         )
 
     def _area_px(self, key: str, *, minimum: int = 1) -> int:
-        return of_width_sq(self.config[key], self._frame_width, minimum=minimum)
+        return rel_width_sq(self.config[key], self._frame_width, minimum=minimum)
 
     def _length_pxf(self, key: str, *, minimum: float = 0.0) -> float:
-        return of_width_float(
+        return rel_width_float(
             self.config[key], self._frame_width, minimum=minimum
         )
 
@@ -215,7 +230,7 @@ class HudDetector(Detector):
     def _build_known_cover(self, shape: Tuple[int, ...]) -> np.ndarray:
         """Binary mask of calibrated HUD footprints (box + search margin)."""
         cover = np.zeros(shape[:2], np.uint8)
-        base_margin = self._length_px("search_margin_of_width")
+        base_margin = self._length_px("search_margin_rel")
         height, width = shape[:2]
         for element in self._elements.values():
             x, y, w, h = element.box
@@ -229,11 +244,11 @@ class HudDetector(Detector):
 
     def _find_element_bounding_boxes(self, union: np.ndarray) -> List[Box]:
         """Group the union bright mask into per-element bounding boxes."""
-        kernel_size = self._length_px("merge_kernel_of_width")
+        kernel_size = self._length_px("merge_kernel_rel")
         kernel = np.ones((kernel_size, kernel_size), np.uint8)
         blobs = cv2.dilate(union.astype(np.uint8), kernel)
         count, labels, stats, _ = cv2.connectedComponentsWithStats(blobs)
-        min_area = self._area_px("min_element_area_of_width_sq")
+        min_area = self._area_px("min_element_area_rel_sq")
         boxes = []
         for i in range(1, count):
             ys, xs = np.nonzero(union & (labels == i))
@@ -248,10 +263,13 @@ class HudDetector(Detector):
     ) -> CalibratedHudElement:
         x, y, w, h = box
         text, element_id = self._label_element_crop(
-            self._max_img[y : y + h, x : x + w], fallback_id=f"elem{x}x{y}"
+            self._ocr_crop(self._max_img, box)
         )
         while element_id in self._elements:  # ensure uniqueness
-            element_id += "x"
+            if element_id.startswith("symbol-"):
+                element_id = self._next_symbol_id()
+            else:
+                element_id += "x"
 
         pixel_count = int(union[y : y + h, x : x + w].sum())
         ys, xs = np.nonzero(union[y : y + h, x : x + w])
@@ -322,7 +340,7 @@ class HudDetector(Detector):
             f"hud/{eid}/position": robust_threshold(
                 pos_changes,
                 sigma_k,
-                self._length_pxf("position_floor_of_width"),
+                self._length_pxf("position_floor_rel"),
             ),
             f"hud/{eid}/size": robust_threshold(
                 size_changes, sigma_k, self.config["size_floor"]
@@ -387,7 +405,7 @@ class HudDetector(Detector):
         if self._known_cover is None:
             return {}
 
-        match_dist = self._length_pxf("new_match_distance_of_width")
+        match_dist = self._length_pxf("new_match_distance_rel")
         ttl = float(self.config["new_track_ttl_seconds"])
         self._prune_new_tracks(timestamp, ttl)
         novel = mask & (self._known_cover == 0)
@@ -399,7 +417,7 @@ class HudDetector(Detector):
         for box in self._find_element_bounding_boxes(novel):
             x, y, w, h = box
             centroid = _box_centroid(box)
-            text, is_symbol = self._read_element_label(gray[y : y + h, x : x + w])
+            text, is_symbol = self._read_element_label(self._ocr_crop(gray, box))
 
             track = self._nearest_new_track(centroid, match_dist, used_track_ids)
             if track is None:
@@ -427,8 +445,12 @@ class HudDetector(Detector):
                 slug = self._next_symbol_id()
                 label = slug
             else:
-                slug = slugify(text) or f"elem{x}x{y}"
-                label = text
+                slug = slugify(text)
+                if slug:
+                    label = text
+                else:
+                    slug = self._next_symbol_id()
+                    label = slug
             aid = f"hud/{slug}/new"
             # Same frozen ID still alive but unmatched → reconnect, don't fork.
             orphan = next(
@@ -521,7 +543,7 @@ class HudDetector(Detector):
 
         # Dilate the search margin around the calibrated box to compensate for the
         # element's size and position jitter.
-        margin = self._length_px("search_margin_of_width")
+        margin = self._length_px("search_margin_rel")
         x, y, w, h = element.box
         x0, y0 = max(0, x - margin), max(0, y - margin)
         x1, y1 = min(mask.shape[1], x + w + margin), min(mask.shape[0], y + h + margin)
@@ -552,39 +574,53 @@ class HudDetector(Detector):
 
         # Read the text from the bounding box and calculate the Levenshtein distance
         # (character similarity) between the current text and the calibrated text.
-        text = self._read_element_text(gray[by0 : by0 + bh, bx0 : bx0 + bw])
+        text = self._read_element_text(self._ocr_crop(gray, (bx0, by0, bw, bh)))
         levenshtein_distance = levenshtein_norm(text, element.text)
 
         return pos_error, size_error, levenshtein_distance
+
+    def _ocr_crop(self, gray: np.ndarray, box: Box) -> np.ndarray:
+        """Crop ``box`` from ``gray`` with ``glyph_crop_pad_rel`` margin.
+
+        Bright-mask boxes sit on hard ink; anti-aliased fringe is often darker
+        than ``bright_threshold`` and would otherwise be excluded from OCR.
+        """
+        pad = self._length_px("glyph_crop_pad_rel")
+        x, y, w, h = box
+        height, width = gray.shape[:2]
+        x0, y0 = max(0, x - pad), max(0, y - pad)
+        x1, y1 = min(width, x + w + pad), min(height, y + h + pad)
+        return gray[y0:y1, x0:x1]
 
     def _next_symbol_id(self) -> str:
         """Allocate the next ``symbol-N`` label for a non-text overlay."""
         self._symbol_serial += 1
         return f"symbol-{self._symbol_serial}"
 
-    def _label_element_crop(
-        self, gray: np.ndarray, *, fallback_id: str
-    ) -> Tuple[str, str]:
-        """Return ``(display_text, element_id)`` for a calibrated HUD crop."""
+    def _label_element_crop(self, gray: np.ndarray) -> Tuple[str, str]:
+        """Return ``(display_text, element_id)`` for a calibrated HUD crop.
+
+        Readable OCR → slug ID.  Icons / unreadable ink → ``symbol-N`` (same
+        scheme as unexpected ``hud/symbol-N/new`` overlays).
+        """
         text, is_symbol = self._read_element_label(gray)
-        if is_symbol:
+        if is_symbol or not slugify(text):
             symbol_id = self._next_symbol_id()
             return symbol_id, symbol_id
-        element_id = slugify(text) or fallback_id
-        return text, element_id
+        return text, slugify(text)
 
     def _read_element_label(self, gray: np.ndarray) -> Tuple[str, bool]:
         """OCR a HUD crop → ``(text, is_symbol)``."""
         result = read_hud(
             gray,
-            min_glyph_height=self._length_px("min_glyph_height_of_width"),
+            min_glyph_height=self._length_px("min_glyph_height_rel"),
             max_glyph_height=self._length_px(
-                "max_glyph_height_of_width", round_up=True
+                "max_glyph_height_rel", round_up=True
             ),
             max_glyph_width=self._length_px(
-                "max_glyph_width_of_width", round_up=True
+                "max_glyph_width_rel", round_up=True
             ),
-            min_glyph_area=self._area_px("min_glyph_area_of_width_sq"),
+            min_glyph_area=self._area_px("min_glyph_area_rel_sq"),
             glyph_font=str(self.config.get("glyph_font") or ""),
             min_match_score=float(
                 self.config.get("min_glyph_match_score", DEFAULT_MIN_MATCH_SCORE)

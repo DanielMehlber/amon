@@ -52,6 +52,9 @@ Key points:
 - Optional hooks: `metadata(anomaly_id)` (static context stored with the
   event) and `regions(anomaly_id)` (image regions to highlight in the
   evidence GIF).
+- `default_config()` may nest knobs under sections (`ocr`, `thresholds`,
+  …); the base class deep-merges YAML overrides and flattens sections for
+  runtime access. `tolerance` stays a nested map.
 - Register the detector in the config; no core changes needed:
 
 ```yaml
@@ -113,6 +116,13 @@ segment / full ID / `default`) then multiplies calibrated thresholds —
 `noise: 1.2` requires that intensity to exceed the learned cutoff by
 20%. No manual per-metric absolute tuning is required.
 
+Detector YAML configs are **sectioned** (`ocr`, `thresholds`,
+`segmentation`, …). The base ``Detector`` deep-merges overrides into
+``default_config()``, then flattens sections so runtime code still reads
+flat keys (`self.config["glyph_font"]`). ``tolerance`` stays a nested map.
+Flat overrides in tests (e.g. `HudDetector({"new_track_ttl_seconds": 0.5})`)
+still work.
+
 ### Temporal detector (`detectors/temporal.py`)
 
 - **Noise**: robust std (`1.4826·MAD`) of the frame difference after
@@ -133,12 +143,15 @@ element it learns: bounding box, centroid, pixel count, text (via the
 offline glyph matcher in `textocr.py`, Otsu-binarised, matched against
 TrueType templates (default: bundled VCR OSD Mono under `amon/fonts/`;
 override with `glyph_font`); size gates and the merge dilation are
-fractions of the processed frame width (`*_of_width` / `*_of_width_sq`,
+fractions of the processed frame width (`*_rel` / `*_rel_sq`,
 authored as absolute pixels at ~1200 px) so downscaling does not require
-retuning; glyphs scoring below `min_glyph_match_score` are not forced
-to a letter — icon-only crops become `symbol-1`, `symbol-2`, …) and the
-blink toggle
-rate. Detection re-locates each element inside a search window around its
+retuning; OCR crops pad by `glyph_crop_pad_rel` beyond the bright-mask
+box so anti-aliased glyph edges are not clipped; glyphs scoring below
+`min_glyph_match_score` are not forced
+to a letter — icon-only or unreadable crops become `symbol-1`,
+`symbol-2`, … for both calibrated element IDs and unexpected `/new`
+overlays) and the blink toggle rate. Detection re-locates each element
+inside a search window around its
 calibrated box and emits four intensities: normalised Levenshtein text
 distance, centroid shift (px), relative box-area change, and toggle-rate
 deviation over a sliding window (covers frequency change and blink

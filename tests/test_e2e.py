@@ -12,7 +12,7 @@ import pytest
 
 from amon.aggregate import SuppressionRules
 from amon.db import Database
-from amon.synthetic import EXPECTED_EVENT_COUNTS, EXPECTED_EVENTS, SCHEDULE
+from amon.synthetic import DURATION, EXPECTED_EVENT_COUNTS, EXPECTED_EVENTS, SCHEDULE
 
 #: Tolerance for event boundaries.  Sliding-window metrics (blink rate)
 #: respond up to one window (2 s) late, plus MAD/cooldown slack.
@@ -220,6 +220,29 @@ class TestSessionAndCalibration:
         assert session["fps"] == pytest.approx(20.0)
         assert "-" in session_id
         assert session["started_at"] > 0
+
+    def test_no_ongoing_events_after_session_ends(self, db_events):
+        """Events still open at EOF must be finalized — never left ongoing."""
+        _, _, events = db_events
+        ongoing = [e for e in events if e.get("status") == "ongoing"]
+        assert ongoing == []
+        assert all(e.get("status") == "completed" for e in events)
+
+    def test_anomaly_open_at_eof_is_completed(self, db_events):
+        """hud_text_until_end runs into EOF; flush must close it as completed."""
+        _, _, events = db_events
+        hits = [
+            e
+            for e in events
+            if matches(e["anomaly_id"], "hud/*/text")
+            and abs(e["start"] - 110.0) <= START_TOLERANCE
+        ]
+        assert len(hits) == 1
+        event = hits[0]
+        assert event["status"] == "completed"
+        # Last synthetic frame is just under DURATION (114 s @ 20 fps).
+        assert event["end"] == pytest.approx(DURATION - 1.0 / 20.0, abs=0.15)
+        assert event["duration"] >= 3.0
 
     def test_calibration_record(self, db_events):
         db, session_id, _ = db_events

@@ -95,6 +95,19 @@ class TestOngoingEvents:
         db.close()
 
 
+class TestOngoingPersistenceExtras:
+    def test_finalize_lingering_ongoing(self, tmp_path):
+        db = Database(tmp_path / "amon.sqlite")
+        db.create_session("s1", "n", "src", 20.0)
+        db.upsert_ongoing_event("s1", _event(end=3.0))
+        assert db.finalize_lingering_ongoing("s1") == 1
+        assert db.finalize_lingering_ongoing("s1") == 0
+        rows = db.list_events("s1")
+        assert len(rows) == 1
+        assert rows[0]["status"] == EVENT_STATUS_COMPLETED
+        db.close()
+
+
 class TestOngoingReportLabels:
     def test_ongoing_summary_flag(self):
         event = {

@@ -8,7 +8,7 @@ or security feeds.
 
 **Idea:** Pixels brighter than a threshold are “overlay.” During
 calibration we collect these masks across many frames and merge them. A
-small **dilation** (`merge_kernel_of_width × frame width`) joins nearby
+small **dilation** (`merge_kernel_rel × frame width`) joins nearby
 bright blobs (letters in a word) into one **connected component** per HUD
 element. Each component gets a bounding box.
 
@@ -24,18 +24,24 @@ drawn from a configurable TrueType font (default: bundled **VCR OSD Mono**
 in `amon/fonts/`). The best match wins. Drop an alternate `.ttf` in that
 folder and set `glyph_font` on `HudDetector` to switch.
 
-**Size gates:** Components shorter than `min_glyph_height_of_width × frame
-width`, taller than `max_glyph_height_of_width × width`, wider than
-`max_glyph_width_of_width × width`, or with fewer than
-`min_glyph_area_of_width_sq × width²` bright pixels are ignored — this
+**Size gates:** Components shorter than `min_glyph_height_rel × frame
+width`, taller than `max_glyph_height_rel × width`, wider than
+`max_glyph_width_rel × width`, or with fewer than
+`min_glyph_area_rel_sq × width²` bright pixels are ignored — this
 filters IR speckles and large glare patches.  Absolute pixel defaults were
 authored at ~1200 px width and are stored as fractions of the *processed*
-frame width so preprocessing scale does not require retuning.  Each
-remaining blob is scored against the charset;
+frame width so preprocessing scale does not require retuning.  OCR crops
+add `glyph_crop_pad_rel × width` around the bright-mask box so
+anti-aliased fringe below `bright_threshold` is not cut off (tight boxes
+otherwise mangle letters such as `S`).  Each remaining blob is scored
+against the charset;
 matches below `min_glyph_match_score` (default ~0.45) are **not** forced to
 the nearest letter.  Crops where every blob fails that gate are non-text
 icons and get ids `symbol-1`, `symbol-2`, … (a filled dot is no longer
-read as `4`).  If at least one glyph clears the gate the crop is treated
+read as `4`).  Calibration uses the same rule: a bright blob whose crop
+is icon-only or fails to produce a readable slug becomes `symbol-N`
+instead of a text id like `cam01`.
+If at least one glyph clears the gate the crop is treated
 as text and weaker neighbours still use their best letter so words such as
 `STAT01` stay intact.
 
@@ -79,7 +85,7 @@ as non-empty text (letters or digits) is an unexpected overlay.
 
 **Anomaly ID:** `hud/<slug>/new` — named once from the **first** OCR reading
 (e.g. `ALERT` → `hud/alert/new`, `1000` → `hud/1000/new`). Continuity across
-frames is by **centroid** (`new_match_distance_of_width × frame width`): if
+frames is by **centroid** (`new_match_distance_rel × frame width`): if
 the overlay rewrites
 its glyphs, blinks, or resizes in place, the same channel stays open until
 the blob disappears. Runtime overlays never emit calibrated-style

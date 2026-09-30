@@ -18,8 +18,9 @@ for VHS / CRT-style overlays.
 ```yaml
 - class: amon.detectors.hud.HudDetector
   config:
-    glyph_font: MyFont.ttf          # resolved under amon/fonts/
-    # glyph_font: /abs/path/Font.ttf
+    ocr:
+      glyph_font: MyFont.ttf          # resolved under amon/fonts/
+      # glyph_font: /abs/path/Font.ttf
 ```
 
 Relative paths are tried against this folder first, then the process

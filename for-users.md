@@ -153,8 +153,8 @@ preprocessing:
 Order: rotate → scale → brightness/contrast.  Defaults leave the image
 unchanged.  HUD/spatial sizes that used to be absolute pixels
 (`merge_kernel`, search margins, glyph gates, match distances, …) are now
-fractions of the **processed** frame width (`*_of_width`, areas as
-`*_of_width_sq`), so a 25% scale keeps the same relative merging behaviour
+fractions of the **processed** frame width (`*_rel`, areas as
+`*_rel_sq`), so a 25% scale keeps the same relative merging behaviour
 without retuning.
 
 ### Live video input

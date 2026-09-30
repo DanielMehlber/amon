@@ -26,7 +26,7 @@ import numpy as np
 
 from amon.detectors import Detector
 from amon.model import Box, CalibrationResult, Frame
-from amon.scale import REFERENCE_WIDTH_PX, of_width, of_width_float
+from amon.scale import REFERENCE_WIDTH_PX, rel_width, rel_width_float
 from amon.stats import robust_threshold
 
 DISTORTION = "spatial/distortion"
@@ -44,17 +44,25 @@ class SpatialDetector(Detector):
     @classmethod
     def default_config(cls) -> dict:
         return {
-            "bright_threshold": 220,  # HUD brightness (matches HudDetector)
-            "exclusion_dilate_of_width": 21 / _W,  # was 21 px
-            "max_corners": 150,
-            "corner_quality": 0.03,
-            "corner_min_distance_of_width": 7 / _W,  # was 7 px
-            "max_baseline_frames": 40,  # calibration frames kept for the median
-            "fb_max_error_of_width": 1.5 / _W,  # was 1.5 px
-            "outlier_rank": 3,  # use the k-th largest displacement
-            "sigma_k": 8.0,
-            "floor_of_width": 2.5 / _W,  # was 2.5 px
-            "region_size_of_width": 28 / _W,  # was 28 px
+            "segmentation": {
+                "bright_threshold": 220,  # HUD brightness (matches HudDetector)
+                "exclusion_dilate_rel": 21 / _W,  # was 21 px
+            },
+            "features": {
+                "max_corners": 150,
+                "corner_quality": 0.03,
+                "corner_min_distance_rel": 7 / _W,  # was 7 px
+                "max_baseline_frames": 40,  # calibration frames kept for the median
+            },
+            "tracking": {
+                "fb_max_error_rel": 1.5 / _W,  # was 1.5 px
+                "outlier_rank": 3,  # use the k-th largest displacement
+                "region_size_rel": 28 / _W,  # was 28 px
+            },
+            "thresholds": {
+                "sigma_k": 8.0,
+                "floor_rel": 2.5 / _W,  # was 2.5 px
+            },
             # Per-anomaly threshold multipliers (float also accepted).
             "tolerance": {"distortion": 1.0},
         }
@@ -72,10 +80,10 @@ class SpatialDetector(Detector):
         self._frame_width = int(image.shape[1])
 
     def _length_px(self, key: str, *, minimum: int = 1) -> int:
-        return of_width(self.config[key], self._frame_width, minimum=minimum)
+        return rel_width(self.config[key], self._frame_width, minimum=minimum)
 
     def _length_pxf(self, key: str, *, minimum: float = 0.0) -> float:
-        return of_width_float(
+        return rel_width_float(
             self.config[key], self._frame_width, minimum=minimum
         )
 
@@ -96,7 +104,7 @@ class SpatialDetector(Detector):
         samples = self._grays[::stride]
         self._baseline = np.median(np.stack(samples), axis=0).astype(np.uint8)
 
-        dilate = max(3, self._length_px("exclusion_dilate_of_width") * 3)
+        dilate = max(3, self._length_px("exclusion_dilate_rel") * 3)
         kernel = np.ones((dilate, dilate), np.uint8)
         excluded = cv2.dilate(self._bright.astype(np.uint8), kernel)
 
@@ -106,7 +114,7 @@ class SpatialDetector(Detector):
             self._baseline,
             maxCorners=int(self.config["max_corners"]),
             qualityLevel=float(self.config["corner_quality"]),
-            minDistance=self._length_px("corner_min_distance_of_width"),
+            minDistance=self._length_px("corner_min_distance_rel"),
             mask=(1 - excluded) * 255,
         )
 
@@ -115,7 +123,7 @@ class SpatialDetector(Detector):
             DISTORTION: robust_threshold(
                 jitter,
                 self.config["sigma_k"],
-                self._length_pxf("floor_of_width"),
+                self._length_pxf("floor_rel"),
             )
         }
         keypoints = [] if self._points is None else self._points.reshape(-1, 2).tolist()
@@ -151,7 +159,7 @@ class SpatialDetector(Detector):
         valid = (
             (st_f.ravel() == 1)
             & (st_b.ravel() == 1)
-            & (fb_error < self._length_pxf("fb_max_error_of_width"))
+            & (fb_error < self._length_pxf("fb_max_error_rel"))
         )
         if not valid.any():
             return 0.0
@@ -164,7 +172,7 @@ class SpatialDetector(Detector):
         # motion/blink cannot register as background distortion.
         if displacement.any():
             thr = int(self.config["bright_threshold"])
-            dilate = max(3, self._length_px("exclusion_dilate_of_width") * 3)
+            dilate = max(3, self._length_px("exclusion_dilate_rel") * 3)
             kernel = np.ones((dilate, dilate), np.uint8)
             hud = cv2.dilate((gray > thr).astype(np.uint8), kernel)
             h, w = hud.shape[:2]
@@ -182,7 +190,7 @@ class SpatialDetector(Detector):
         # Record the regions of the moved keypoints.
         if record_regions:
             threshold = self._thresholds.get(DISTORTION, np.inf)
-            half = self._length_px("region_size_of_width") // 2
+            half = self._length_px("region_size_rel") // 2
             self._last_moved = [
                 (int(x) - half, int(y) - half, 2 * half, 2 * half)
                 for (x, y), d in zip(self._points.reshape(-1, 2), displacement)

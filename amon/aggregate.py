@@ -322,8 +322,12 @@ class EventAggregator:
             )
         return snapshots
 
-    def flush(self) -> List[AnomalyEvent]:
-        """Close all events that are still open (called at stream end)."""
+    def flush(self) -> Tuple[List[AnomalyEvent], List[str]]:
+        """Close all events that are still open (called at stream end).
+
+        Returns ``(completed_events, discarded_anomaly_ids)``.  Discarded IDs
+        were open at EOF but shorter than ``min_duration_seconds``.
+        """
         still_open = list(self._open)
         if still_open:
             log.debug(
@@ -331,7 +335,8 @@ class EventAggregator:
                 len(still_open),
                 still_open,
             )
-        closed = []
+        closed: List[AnomalyEvent] = []
+        discarded: List[str] = []
         for aid in still_open:
             event = self._close(aid)
             if event:
@@ -345,13 +350,14 @@ class EventAggregator:
                     event.max_intensity,
                 )
             else:
+                discarded.append(aid)
                 log.debug(
                     "flush DISCARD %s: open at stream end but duration shorter "
                     "than min_duration_seconds=%.2fs",
                     aid,
                     self.min_duration,
                 )
-        return closed
+        return closed, discarded
 
     def _close(self, aid: str) -> Optional[AnomalyEvent]:
         state = self._open.pop(aid)

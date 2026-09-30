@@ -83,7 +83,7 @@ DEFAULTS: dict = {
 
 def merge_defaults(config: dict) -> dict:
     """Return ``config`` deep-merged over the framework defaults."""
-    return _deep_merge(copy.deepcopy(DEFAULTS), config or {})
+    return deep_merge(copy.deepcopy(DEFAULTS), config or {})
 
 
 def load_config(path: Union[str, Path]) -> dict:
@@ -92,10 +92,11 @@ def load_config(path: Union[str, Path]) -> dict:
         return merge_defaults(yaml.safe_load(fh) or {})
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge ``override`` into ``base`` (dicts only; lists replace)."""
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
-            _deep_merge(base[key], value)
+            deep_merge(base[key], value)
         else:
             base[key] = value
     return base

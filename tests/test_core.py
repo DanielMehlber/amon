@@ -143,6 +143,36 @@ class TestTolerance:
         assert scaled[CONTRAST] == pytest.approx(base_thr[CONTRAST] * 1.1)
 
 
+class TestDetectorConfigSections:
+    def test_nested_ocr_override_keeps_sibling_defaults(self):
+        from amon.detectors.hud import HudDetector
+        from amon.textocr import DEFAULT_MIN_MATCH_SCORE
+
+        detector = HudDetector({"ocr": {"glyph_font": "Custom.ttf"}})
+        assert detector.config["glyph_font"] == "Custom.ttf"
+        assert detector.config["min_glyph_match_score"] == DEFAULT_MIN_MATCH_SCORE
+        assert detector.config["bright_threshold"] == 220
+        assert detector.config["merge_kernel_rel"] == pytest.approx(15 / 1200)
+
+    def test_flat_override_still_wins(self):
+        from amon.detectors.hud import HudDetector
+
+        detector = HudDetector({"new_track_ttl_seconds": 0.5})
+        assert detector.config["new_track_ttl_seconds"] == 0.5
+
+    def test_temporal_and_spatial_sections_flatten(self):
+        from amon.detectors.spatial import SpatialDetector
+        from amon.detectors.temporal import TemporalDetector
+
+        temporal = TemporalDetector({"thresholds": {"noise_floor": 4.0}})
+        assert temporal.config["noise_floor"] == 4.0
+        assert temporal.config["window_seconds"] == 0.5
+
+        spatial = SpatialDetector({"features": {"max_corners": 80}})
+        assert spatial.config["max_corners"] == 80
+        assert spatial.config["bright_threshold"] == 220
+
+
 class TestTextOcr:
     def _render_text(self, text: str, size: int = 28) -> np.ndarray:
         from amon.textocr import resolve_glyph_font

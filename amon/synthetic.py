@@ -54,6 +54,8 @@ SCHEDULE: List[Tuple[str, float, float]] = [
     ("hud_new_cycle", 98.0, 107.0),
     # Non-text icons: centre crosshair + side dot → symbol-N, not letter slugs.
     ("hud_new_symbols", 109.0, 113.0),
+    # Still above threshold when the file ends — must finalize as completed.
+    ("hud_text_until_end", 110.0, DURATION),
 ]
 
 #: Anomaly ID patterns the default detector set is expected to report per
@@ -75,6 +77,7 @@ EXPECTED_EVENTS = {
     "hud_new_mutate": "hud/alert/new",
     "hud_new_cycle": "hud/1000/new",
     "hud_new_symbols": "hud/symbol-*/new",
+    "hud_text_until_end": "hud/*/text",
 }
 
 #: How many distinct events are expected for a schedule key (default 1).
@@ -250,7 +253,9 @@ class SyntheticVideo:
 
     def _hud_text(self, spec: HudSpec, active: Set[str]) -> str:
         if spec.key == "cam" and (
-            "hud_text" in active or "hud_parallel_text" in active
+            "hud_text" in active
+            or "hud_parallel_text" in active
+            or "hud_text_until_end" in active
         ):
             return "ERR42"
         return spec.text

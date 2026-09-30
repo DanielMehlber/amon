@@ -94,6 +94,32 @@ class TestHudDetector:
         texts = {e.text for e in hud_detector._elements.values()}
         assert "CAM 01" in texts or "CAM01" in texts
 
+    def test_stat01_survives_tight_bright_box_via_crop_pad(self, scene):
+        """OCR pad restores glyphs when the bright-mask box clips soft edges."""
+        import cv2
+        import numpy as np
+        from amon.synthetic import FPS
+        from amon.textocr import read_hud
+
+        detector = HudDetector()
+        calibrate(detector, scene)
+        element = next(e for e in detector._elements.values() if "STAT" in e.text)
+        # Rebuild a max-image frame and inset the bright box (simulates AA fringe
+        # excluded by bright_threshold).
+        grays = [
+            cv2.cvtColor(scene.frame(i / FPS, index=i), cv2.COLOR_BGR2GRAY)
+            for i in range(int(10 * FPS))
+        ]
+        max_img = np.max(np.stack(grays), axis=0)
+        x, y, w, h = element.box
+        inset = (x + 2, y + 2, max(1, w - 4), max(1, h - 4))
+        ix, iy, iw, ih = inset
+        tight = max_img[iy : iy + ih, ix : ix + iw]
+        assert read_hud(tight).text != element.text
+        assert not read_hud(tight).text.startswith("STAT")
+        padded = detector._ocr_crop(max_img, inset)
+        assert read_hud(padded).text == element.text
+
     def test_anomaly_ids_cover_all_aspects(self, hud_detector):
         thresholds = hud_detector.thresholds()
         # Calibrated elements expose text/position/size/blink; new overlays are

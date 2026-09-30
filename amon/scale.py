@@ -13,7 +13,7 @@ import math
 REFERENCE_WIDTH_PX = 1200
 
 
-def of_width(
+def rel_width(
     fraction: float,
     width: int,
     *,
@@ -28,14 +28,14 @@ def of_width(
     return max(minimum, value)
 
 
-def of_width_sq(fraction: float, width: int, *, minimum: int = 1) -> int:
+def rel_width_sq(fraction: float, width: int, *, minimum: int = 1) -> int:
     """Return ``fraction * width²`` as an integer pixel area."""
     if width <= 0:
         return minimum
     return max(minimum, int(round(float(fraction) * float(width) * float(width))))
 
 
-def of_width_float(
+def rel_width_float(
     fraction: float, width: int, *, minimum: float = 0.0
 ) -> float:
     """Return ``fraction * width`` as a float (floors, match distances)."""

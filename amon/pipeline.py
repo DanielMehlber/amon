@@ -167,12 +167,26 @@ class Pipeline:
                     continue
 
                 self._monitor_frame(frame, ring, worker, fps)
-            for event in self.aggregator.flush():
+            closed_at_end, discarded_at_end = self.aggregator.flush()
+            for anomaly_id in discarded_at_end:
+                self._clips.pop(anomaly_id, None)
+                self._region_timelines.pop(anomaly_id, None)
+                self._enrichment.pop(anomaly_id, None)
+                self._forget_dynamic_channel(anomaly_id)
+                worker.submit_discard(anomaly_id)
+            for event in closed_at_end:
                 self._finalize_event(event, worker, fps)
         finally:
             worker.close()
             self.source.close()
             db = Database(self.db_path)
+            lingering = db.finalize_lingering_ongoing(self.session_id)
+            if lingering:
+                log.warning(
+                    "promoted %d lingering ongoing event(s) to completed at "
+                    "session end (background finalize did not finish in time)",
+                    lingering,
+                )
             db.finish_session(self.session_id)
             db.close()
             log.info("session %s finished", self.session_id)

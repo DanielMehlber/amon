@@ -111,6 +111,26 @@ class Database:
         )
         self._conn.commit()
 
+    def finalize_lingering_ongoing(self, session_id: str) -> int:
+        """Promote any remaining ongoing rows to completed at stream end.
+
+        Returns how many rows were promoted.  Normally the background worker
+        has already completed them; this is a safety net when finalize jobs
+        were dropped or the worker did not drain in time.
+        """
+        rows = self._conn.execute(
+            "SELECT id FROM events WHERE session_id = ? AND status = ?",
+            (session_id, EVENT_STATUS_ONGOING),
+        ).fetchall()
+        if not rows:
+            return 0
+        self._conn.execute(
+            "UPDATE events SET status = ? WHERE session_id = ? AND status = ?",
+            (EVENT_STATUS_COMPLETED, session_id, EVENT_STATUS_ONGOING),
+        )
+        self._conn.commit()
+        return len(rows)
+
     def list_sessions(self) -> List[dict]:
         rows = self._conn.execute(
             "SELECT * FROM sessions ORDER BY started_at DESC"

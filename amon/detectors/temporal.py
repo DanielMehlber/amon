@@ -46,11 +46,15 @@ class TemporalDetector(Detector):
     @classmethod
     def default_config(cls) -> dict:
         return {
-            "window_seconds": 0.5,  # sliding window for the flicker metric
-            "sigma_k": 8.0,  # threshold distance in robust sigmas
-            "noise_floor": 3.0,  # minimum noise threshold (gray levels)
-            "flicker_floor": 5.0,  # minimum flicker threshold (gray levels)
-            "contrast_floor": 0.15,  # minimum relative contrast deviation
+            "metrics": {
+                "window_seconds": 0.5,  # sliding window for the flicker metric
+            },
+            "thresholds": {
+                "sigma_k": 8.0,  # threshold distance in robust sigmas
+                "noise_floor": 3.0,  # minimum noise threshold (gray levels)
+                "flicker_floor": 5.0,  # minimum flicker threshold (gray levels)
+                "contrast_floor": 0.15,  # minimum relative contrast deviation
+            },
             # Per-anomaly threshold multipliers (float also accepted).
             "tolerance": {"noise": 1.0, "flicker": 1.0, "contrast": 1.0},
         }

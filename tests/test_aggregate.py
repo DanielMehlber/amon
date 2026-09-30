@@ -111,9 +111,17 @@ class TestEventAggregator:
     def test_flush_closes_open_events(self):
         agg = make_aggregator()
         feed(agg, [i * 0.1 for i in range(30)], lambda t: 5.0 if t >= 1.0 else 0.0)
-        closed = agg.flush()
+        closed, discarded = agg.flush()
         assert len(closed) == 1
+        assert discarded == []
         assert closed[0].end == pytest.approx(2.9)
+
+    def test_flush_discards_short_open_events(self):
+        agg = make_aggregator(min_duration_seconds=1.0)
+        feed(agg, [0.0, 0.1, 0.2], lambda t: 5.0)
+        closed, discarded = agg.flush()
+        assert closed == []
+        assert discarded == ["a"]
 
     def test_peek_open_exposes_provisional_end(self):
         agg = make_aggregator()
@@ -135,8 +143,9 @@ class TestEventAggregator:
                     "secondary": Reading(5.0, 1.0, "det"),
                 },
             )
-        closed = agg.flush()
+        closed, discarded = agg.flush()
         assert [e.anomaly_id for e in closed] == ["primary"]
+        assert discarded == []
 
     def test_parallel_hud_anomalies_create_separate_events(self):
         agg = make_aggregator(
@@ -157,7 +166,7 @@ class TestEventAggregator:
                 },
             )
             closed.extend(c)
-        closed.extend(agg.flush())
+        closed.extend(agg.flush()[0])
         by_id = {e.anomaly_id: e for e in closed}
         assert set(by_id) == {"hud/cam01/text", "hud/temp22/position"}
         assert by_id["hud/cam01/text"].duration == pytest.approx(2.0)
@@ -180,13 +189,13 @@ class TestEventAggregator:
                 },
             )
             closed.extend(c)
-        closed.extend(agg.flush())
+        closed.extend(agg.flush()[0])
         assert {e.anomaly_id for e in closed} == {"hud/cam01/size", "hud/temp22/text"}
 
     def test_timeline_is_capped(self):
         agg = make_aggregator(max_timeline_points=50)
         feed(agg, [i * 0.01 for i in range(2000)], lambda t: 5.0)
-        event = agg.flush()[0]
+        event = agg.flush()[0][0]
         assert len(event.timeline) <= 101
 
     def test_missing_reading_closes_open_dynamic_channel(self):
@@ -200,7 +209,7 @@ class TestEventAggregator:
                 readings["hud/alert/new"] = Reading(1.0, 0.5, "hud")
             _, c, _ = agg.update(t, readings)
             closed.extend(c)
-        closed.extend(agg.flush())
+        closed.extend(agg.flush()[0])
         assert len(closed) == 1
         assert closed[0].anomaly_id == "hud/alert/new"
         assert closed[0].end == pytest.approx(2.0)
@@ -213,7 +222,7 @@ class TestEventAggregator:
                 readings["hud/alert/new"] = Reading(1.0, 0.5, "hud")
             _, c, _ = agg.update(t, readings)
             closed2.extend(c)
-        closed2.extend(agg.flush())
+        closed2.extend(agg.flush()[0])
         assert len(closed2) == 1
         assert closed2[0].start == pytest.approx(4.5)
 

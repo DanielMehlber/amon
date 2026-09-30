@@ -4,6 +4,9 @@
 #   python -m amon synth test-video.avi
 #   python -m amon monitor test.yaml
 #   python -m amon report test.yaml
+#
+# Omitted keys fall back to framework / detector defaults.  Commented lines
+# show those defaults — uncomment (and edit) to override.
 
 session_name: test
 data_dir: data
@@ -13,14 +16,14 @@ video_source:
   config:
     path: test-video.avi
     realtime: false        # true paces playback like a live stream
+    # fps: null            # override broken/missing file FPS metadata
     # processing_fps: 21   # optional cap; skip frames above this rate
 
-# Optional image transforms (also used by stream.yaml):
-# preprocessing:
-#   scale: 100
-#   rotate: 0
-#   brightness: 0
-#   contrast: 1.0
+preprocessing:
+  # scale: 100             # percent of input size (aspect preserved); 100 = unchanged
+  # rotate: 0              # degrees clockwise (90 / 180 / 270 use fast path)
+  # brightness: 0          # additive offset [-255, 255]
+  # contrast: 1.0          # multiplicative gain (1.0 = unchanged)
 
 calibration:
   duration_seconds: 10.0
@@ -28,13 +31,47 @@ calibration:
 detectors:
   - class: amon.detectors.temporal.TemporalDetector
     config:
+      # metrics:
+      #   window_seconds: 0.5      # sliding window for the flicker metric
+      # thresholds:
+      #   sigma_k: 8.0             # threshold distance in robust sigmas
+      #   noise_floor: 3.0         # minimum noise threshold (gray levels)
+      #   flicker_floor: 5.0       # minimum flicker threshold (gray levels)
+      #   contrast_floor: 0.15     # minimum relative contrast deviation
       # Per-anomaly threshold multipliers (1.2 = must exceed calibrated by 20%).
+      # A single float also works: tolerance: 1.2
       tolerance:
         noise: 1.2
         flicker: 1.0
         contrast: 1.0
   - class: amon.detectors.hud.HudDetector
     config:
+      # segmentation:
+      #   bright_threshold: 220              # gray level separating HUD from scene
+      #   search_margin_rel: 0.016667        # fraction of frame width (20 px @ 1200)
+      #   merge_kernel_rel: 0.0125           # dilation joining glyphs (15 px @ 1200)
+      #   min_element_area_rel_sq: 0.000010417  # 15 px² @ 1200
+      #   visible_fraction: 0.25             # bright-pixel fraction counting as visible
+      # ocr:
+      #   min_glyph_height_rel: 0.006667     # 8 px @ 1200
+      #   max_glyph_height_rel: 0.08         # 96 px @ 1200
+      #   max_glyph_width_rel: 0.08          # 96 px @ 1200
+      #   min_glyph_area_rel_sq: 0.000013889 # 20 px² @ 1200
+      #   glyph_crop_pad_rel: 0.005          # 6 px @ 1200; OCR margin beyond bright box
+      #   min_glyph_match_score: 0.45        # below this → symbol-N, not a forced letter
+      #   glyph_font: VCR_OSD_MONO_1.001.ttf # file under amon/fonts/ (or absolute path)
+      # blink:
+      #   blink_window_seconds: 2.0          # sliding window for the toggle rate
+      # thresholds:
+      #   sigma_k: 8.0
+      #   text_floor: 0.3                    # min normalised text distance
+      #   position_floor_rel: 0.005          # 6 px @ 1200
+      #   size_floor: 0.25                   # min relative area change
+      #   blink_floor: 2.0                   # min toggle-rate deviation (1/s)
+      #   new_floor: 0.5                     # intensity when unexpected text is present
+      # new_overlays:
+      #   new_match_distance_rel: 0.025      # 30 px @ 1200; /new track continuity
+      #   new_track_ttl_seconds: 1.0         # forget unseen /new tracks after this
       tolerance:
         text: 1.0
         position: 1.2
@@ -43,12 +80,29 @@ detectors:
         new: 1.0
   - class: amon.detectors.spatial.SpatialDetector
     config:
+      # segmentation:
+      #   bright_threshold: 220              # HUD brightness (matches HudDetector)
+      #   exclusion_dilate_rel: 0.0175       # 21 px @ 1200; HUD mask dilation
+      # features:
+      #   max_corners: 150
+      #   corner_quality: 0.03
+      #   corner_min_distance_rel: 0.005833  # 7 px @ 1200
+      #   max_baseline_frames: 40           # calibration frames kept for median
+      # tracking:
+      #   fb_max_error_rel: 0.00125         # 1.5 px @ 1200; forward-backward
+      #   outlier_rank: 3                   # k-th largest displacement
+      #   region_size_rel: 0.023333         # 28 px @ 1200; highlight box size
+      # thresholds:
+      #   sigma_k: 8.0
+      #   floor_rel: 0.002083               # 2.5 px @ 1200; min displacement
       tolerance:
         distortion: 1.2
 
 aggregation:
   cooldown_seconds: 1.0
   min_duration_seconds: 0.5
+  # suppression_linger_seconds: 2.5  # keep suppressing after primary subsides
+  # max_timeline_points: 2000
   # Exclusion hierarchy: primary anomalies suppress their side-effects.
   # '*' = any matching path (no element binding); '#' = same HUD element.
   # No rules are built-in — list every suppression you want here.
@@ -62,19 +116,22 @@ media:
   max_clip_seconds: 6.0
   lead_seconds: 1.0
   gif_max_fps: 10.0
+  # queue_maxsize: 8          # max pending background GIF/DB jobs
 
 report:
   port: 5006
   offline: true
-  address: 127.0.0.1
+  address: 127.0.0.1         # use 0.0.0.0 to reach the UI from other hosts
+  # websocket_origin: null   # override WebSocket origins (list) if needed
 
 export:
-  format: html
+  format: html               # html | csv
 
 # Diagnostic logging (per-run file under logs/<session_id>.log).
-# Console stays quiet (anomalies only); the file gets the full DEBUG trace.
 logging:
   console: true
-  console_level: INFO      # DEBUG | INFO | WARNING | ERROR
-  file_level: DEBUG        # set INFO to shrink log files
+  console_level: INFO        # DEBUG | INFO | WARNING | ERROR
+  file_level: DEBUG          # set INFO to shrink log files
   dir: logs
+  # max_bytes: 52428800      # rotate each log file at this size (50 MiB)
+  # backup_count: 5          # rotated backups kept per session
