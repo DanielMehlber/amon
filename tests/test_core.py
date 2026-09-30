@@ -152,7 +152,7 @@ class TestDetectorConfigSections:
         assert detector.config["glyph_font"] == "Custom.ttf"
         assert detector.config["min_glyph_match_score"] == DEFAULT_MIN_MATCH_SCORE
         assert detector.config["bright_threshold"] == 220
-        assert detector.config["merge_kernel_rel"] == pytest.approx(15 / 1200)
+        assert detector.config["merge_kernel_rel"] == pytest.approx(0.03)
 
     def test_flat_override_still_wins(self):
         from amon.detectors.hud import HudDetector
@@ -222,6 +222,29 @@ class TestTextOcr:
         cv2.line(cross, (32, 8), (32, 56), 255, 2)
         cv2.line(cross, (8, 32), (56, 32), 255, 2)
         assert read_hud(cross).is_symbol
+
+    def test_fragmented_single_s_rescored_as_letter(self):
+        """Noisy/fragmented lone S must not fall through to symbol-N."""
+        from amon.textocr import resolve_glyph_font
+        from PIL import Image, ImageDraw, ImageFont
+
+        font = ImageFont.truetype(str(resolve_glyph_font()), size=18)
+        cell = Image.new("L", (48, 48), 0)
+        ImageDraw.Draw(cell).text((4, 4), "S", fill=255, font=font)
+        ink = np.asarray(cell)
+        canvas = np.full_like(ink, 50)
+        canvas = np.maximum(
+            canvas, ((ink.astype(np.float32) / 255) * 200).astype(np.uint8)
+        )
+        rng = np.random.default_rng(0)
+        noisy = np.clip(
+            canvas.astype(np.int16) + rng.integers(-20, 20, canvas.shape), 0, 255
+        ).astype(np.uint8)
+        result = read_hud(
+            noisy, min_glyph_height=2, min_glyph_area=1, max_glyph_height=40
+        )
+        assert not result.is_symbol
+        assert result.text == "S"
 
     def test_empty_image_reads_empty(self):
         assert read_text(np.zeros((20, 20), np.uint8)) == ""

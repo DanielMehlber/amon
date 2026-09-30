@@ -55,7 +55,7 @@ detectors:
       # segmentation:
       #   bright_threshold: 220              # gray level separating HUD from scene
       #   search_margin_rel: 0.016667        # fraction of frame width (20 px @ 1200)
-      #   merge_kernel_rel: 0.0125           # dilation joining glyphs (15 px @ 1200)
+      #   merge_kernel_rel: 0.03                # dilation joining glyphs (~36 px @ 1200)
       #   min_element_area_rel_sq: 0.000010417  # 15 px² @ 1200
       #   visible_fraction: 0.25             # bright-pixel fraction counting as visible
       ocr:

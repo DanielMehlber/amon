@@ -257,12 +257,15 @@ class TestSessionAndCalibration:
         assert frame["height"] == 240
         assert frame["fps"] == pytest.approx(20.0)
         elements = annotations["hud_elements"]
-        assert len(elements) == 4
+        assert len(elements) == 7
         blink_rates = sorted(e["blink_hz"] for e in elements)
         assert blink_rates[0] == pytest.approx(0.0, abs=0.2)
         assert blink_rates[-1] == pytest.approx(2.0, abs=0.4)
         assert any("CAM01" in e["text"] for e in elements)
         assert any("REC" in e["text"] for e in elements)
+        texts = {e["text"] for e in elements}
+        assert {"S", "A", "X"} <= texts
+        assert not any(str(t).startswith("symbol-") for t in texts)
 
         thresholds = calibration["thresholds"]
         assert set(thresholds) == {"temporal", "hud", "spatial"}

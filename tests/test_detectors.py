@@ -80,15 +80,27 @@ class TestTemporalDetector:
 
 
 class TestHudDetector:
-    def test_calibration_finds_four_elements(self, hud_detector):
+    def test_calibration_finds_expected_elements(self, hud_detector):
         elements = hud_detector._elements
-        assert len(elements) == 4
+        assert len(elements) == 7
         texts = {e.text for e in elements.values()}
         assert "CAM01" in texts
         assert "REC" in texts
+        assert "STAT01" in texts
+        assert {"S", "A", "X"} <= texts
+        assert not any(t.startswith("symbol-") for t in texts)
         blink_rates = sorted(e.toggle_rate for e in elements.values())
         assert blink_rates[0] == pytest.approx(0.0, abs=0.3)  # static labels
         assert blink_rates[-1] == pytest.approx(4.0, abs=0.8)  # 2 Hz REC blinker
+
+    def test_single_letter_elements_are_letters_not_symbols(self, hud_detector):
+        """Lone glyphs must calibrate as letter IDs, not symbol-N."""
+        by_text = {e.text: e for e in hud_detector._elements.values()}
+        for letter in ("S", "A", "X"):
+            assert letter in by_text, f"missing lone {letter!r}"
+            element = by_text[letter]
+            assert not element.element_id.startswith("symbol-")
+            assert element.element_id == letter.lower()
 
     def test_static_label_text_is_read(self, hud_detector):
         texts = {e.text for e in hud_detector._elements.values()}

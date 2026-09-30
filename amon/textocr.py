@@ -9,7 +9,9 @@ VCR OSD Mono). The recognizer covers ``A-Z`` and ``0-9``.
 
 Glyphs whose best template score falls below ``min_match_score`` are
 treated as non-letters (dots, crosshairs, icons) rather than forced into
-the nearest charset character.
+the nearest charset character.  When every connected component fails that
+gate, the recognizer also tries matching the **union** of all ink as one
+glyph — that recovers a fragmented lone ``S`` without promoting icons.
 """
 
 from __future__ import annotations
@@ -179,7 +181,17 @@ def read_hud(
     scores = [s for *_rest, s in scored]
     mean_score = float(np.mean(scores)) if scores else 0.0
     if not any(s >= score_gate for s in scores):
-        # Ink passed the size gates but nothing looked like a letter/digit.
+        # Per-component matching failed — common for a lone ``S`` whose ink
+        # fragments under noise/thresholding.  Rescore the full ink extent as
+        # one glyph; real icons (dots, crosshairs) still stay below the gate.
+        merged = _match_whole_ink(binary, templates)
+        if merged is not None and merged[1] >= score_gate:
+            char, score = merged
+            return HudRead(
+                text=char.translate(CONFUSABLE),
+                is_symbol=False,
+                mean_score=score,
+            )
         return HudRead(text="", is_symbol=True, mean_score=mean_score)
 
     # At least one confident glyph → treat as text.  Keep best-char for every
@@ -196,6 +208,20 @@ def read_hud(
         is_symbol=False,
         mean_score=mean_score,
     )
+
+
+def _match_whole_ink(
+    binary: np.ndarray,
+    templates: Dict[str, Tuple[np.ndarray, float]],
+) -> Optional[Tuple[str, float]]:
+    """Best charset match for the union of all bright ink in ``binary``."""
+    ys, xs = np.nonzero(binary)
+    if len(xs) == 0:
+        return None
+    glyph, aspect = _normalise(
+        binary[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1] > 0
+    )
+    return _match_char(glyph, aspect, templates)
 
 
 def read_text(

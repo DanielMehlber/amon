@@ -36,8 +36,10 @@ anti-aliased fringe below `bright_threshold` is not cut off (tight boxes
 otherwise mangle letters such as `S`).  Each remaining blob is scored
 against the charset;
 matches below `min_glyph_match_score` (default ~0.45) are **not** forced to
-the nearest letter.  Crops where every blob fails that gate are non-text
-icons and get ids `symbol-1`, `symbol-2`, … (a filled dot is no longer
+the nearest letter.  Crops where every blob fails that gate first try
+matching the **union of all ink** as one glyph (recovers a fragmented
+lone `S`); if that still fails they are non-text icons and get ids
+`symbol-1`, `symbol-2`, … (a filled dot is no longer
 read as `4`).  Calibration uses the same rule: a bright blob whose crop
 is icon-only or fails to produce a readable slug becomes `symbol-N`
 instead of a text id like `cam01`.

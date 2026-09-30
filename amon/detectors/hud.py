@@ -101,7 +101,7 @@ class HudDetector(Detector):
                 "bright_threshold": 220,  # gray level separating HUD from scene
                 # Fractions of processed frame width (tuned as px @ 1200 → /1200).
                 "search_margin_rel": 20 / _W,  # was 20 px
-                "merge_kernel_rel": 15 / _W,  # was 15 px (~1.25% of width)
+                "merge_kernel_rel": 0.03,  # dilation joining glyphs (~36 px @ 1200)
                 "min_element_area_rel_sq": 15 / _W2,  # was 15 px²
                 "visible_fraction": 0.25,  # bright-pixel fraction counting as visible
             },

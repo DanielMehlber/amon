@@ -101,12 +101,17 @@ class HudSpec:
     blink_hz: float  # 0 = always visible
 
 
-# Four HUD elements spread across the frame for variance.
+# Baseline HUD overlays: multi-glyph labels plus lone letters (real HUDs often
+# show a single status glyph; ``S`` in particular used to fall through to
+# symbol-N when connected components fragmented the ink).
 HUD_SPECS: Tuple[HudSpec, ...] = (
     HudSpec("cam", "CAM01", (14, 28), 1.0, 0.0),
     HudSpec("rec", "REC", (250, 28), 1.0, 2.0),
     HudSpec("temp", "TEMP22", (118, 28), 0.9, 1.0),
     HudSpec("stat", "STAT01", (14, 220), 1.0, 0.0),
+    HudSpec("letter_s", "S", (60, 100), 1.0, 0.0),
+    HudSpec("letter_a", "A", (280, 100), 1.0, 0.0),
+    HudSpec("letter_x", "X", (160, 220), 1.0, 0.0),
 )
 
 #: Overlays that appear only during the ``hud_new`` schedule window.
@@ -200,7 +205,7 @@ class SyntheticVideo:
 
         Characters are blitted with a fixed 1 px ink gap so that:
         - OCR can still segment individual glyphs, and
-        - the width-relative merge kernel (15 px @ 1200 → ~4 px @ 320)
+        - the width-relative merge kernel (0.03 × width → ~10 px @ 320)
           joins them into one HUD element on the synthetic frame.
         """
         font_size = max(10, int(round(18 * scale)))
