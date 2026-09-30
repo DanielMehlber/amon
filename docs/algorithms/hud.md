@@ -8,8 +8,9 @@ or security feeds.
 
 **Idea:** Pixels brighter than a threshold are “overlay.” During
 calibration we collect these masks across many frames and merge them. A
-small **dilation** joins nearby bright blobs (letters in a word) into one
-**connected component** per HUD element. Each component gets a bounding box.
+small **dilation** (`merge_kernel_of_width × frame width`) joins nearby
+bright blobs (letters in a word) into one **connected component** per HUD
+element. Each component gets a bounding box.
 
 **Why it works:** The static scene stays below the brightness cutoff; only
 deliberately bright UI pixels qualify.
@@ -23,10 +24,14 @@ drawn from a configurable TrueType font (default: bundled **VCR OSD Mono**
 in `amon/fonts/`). The best match wins. Drop an alternate `.ttf` in that
 folder and set `glyph_font` on `HudDetector` to switch.
 
-**Size gates:** Components shorter than `min_glyph_height`, taller than
-`max_glyph_height`, wider than `max_glyph_width`, or with fewer than
-`min_glyph_area` bright pixels are ignored — this filters IR speckles and
-large glare patches.  Each remaining blob is scored against the charset;
+**Size gates:** Components shorter than `min_glyph_height_of_width × frame
+width`, taller than `max_glyph_height_of_width × width`, wider than
+`max_glyph_width_of_width × width`, or with fewer than
+`min_glyph_area_of_width_sq × width²` bright pixels are ignored — this
+filters IR speckles and large glare patches.  Absolute pixel defaults were
+authored at ~1200 px width and are stored as fractions of the *processed*
+frame width so preprocessing scale does not require retuning.  Each
+remaining blob is scored against the charset;
 matches below `min_glyph_match_score` (default ~0.45) are **not** forced to
 the nearest letter.  Crops where every blob fails that gate are non-text
 icons and get ids `symbol-1`, `symbol-2`, … (a filled dot is no longer
@@ -74,7 +79,8 @@ as non-empty text (letters or digits) is an unexpected overlay.
 
 **Anomaly ID:** `hud/<slug>/new` — named once from the **first** OCR reading
 (e.g. `ALERT` → `hud/alert/new`, `1000` → `hud/1000/new`). Continuity across
-frames is by **centroid** (`new_match_distance_px`): if the overlay rewrites
+frames is by **centroid** (`new_match_distance_of_width × frame width`): if
+the overlay rewrites
 its glyphs, blinks, or resizes in place, the same channel stays open until
 the blob disappears. Runtime overlays never emit calibrated-style
 `text` / `position` / `size` / `blink` anomalies. Tracks older than

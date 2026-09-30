@@ -16,6 +16,7 @@ video_source:
     device: 0                # portable index (0, 1, …); or /dev/video0 on Linux
     # capture_fourcc: MJPG   # optional; depends on the capture device
     processing_fps: 10       # optional cap; native rate auto-detected
+    # warn_on_dropped_frames: false  # silence "pipeline cannot keep up" warnings
 
 preprocessing:
   scale: 50                  # percent of input size (aspect ratio preserved)
@@ -44,8 +45,9 @@ detectors:
         new: 1.0
       glyph_font: VCR_OSD_MONO_1.001.ttf   # file under amon/fonts/ (or absolute path)
       # min_glyph_match_score: 0.55        # below this → symbol-N, not a forced letter
-      # max_glyph_height: 64              # reject oversized bright blobs as letters
-      # max_glyph_width: 64
+      # merge_kernel_of_width: 0.0125     # fraction of frame width (15 px @ 1200)
+      # max_glyph_height_of_width: 0.08  # reject oversized bright blobs as letters
+      # max_glyph_width_of_width: 0.08
   - class: amon.detectors.spatial.SpatialDetector
     config:
       tolerance:

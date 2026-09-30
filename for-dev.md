@@ -75,7 +75,8 @@ Implement `fps` and `frames()` (a generator of `Frame` objects), raise
   ``processing_fps`` optionally throttles output.  A reader thread feeds a
   dropping ``frame_buffer_size`` queue (default 1) so a slow pipeline
   discards oldest frames instead of growing RAM; sustained drops log a
-  hardware-too-slow warning.  Transient capture failures reopen the device
+  hardware-too-slow warning unless ``warn_on_dropped_frames: false``.
+  Transient capture failures reopen the device
   up to ``reconnect_attempts`` times.  When the configured device is
   unavailable, open alternatives are listed in the error before the
   pipeline aborts.
@@ -131,10 +132,10 @@ mask is dilated and split into connected components = HUD elements. Per
 element it learns: bounding box, centroid, pixel count, text (via the
 offline glyph matcher in `textocr.py`, Otsu-binarised, matched against
 TrueType templates (default: bundled VCR OSD Mono under `amon/fonts/`;
-override with `glyph_font`); components outside
-`min_glyph_height`…`max_glyph_height` / `max_glyph_width` or below
-`min_glyph_area` are ignored so tiny IR speckles and large glare patches
-are skipped; glyphs scoring below `min_glyph_match_score` are not forced
+override with `glyph_font`); size gates and the merge dilation are
+fractions of the processed frame width (`*_of_width` / `*_of_width_sq`,
+authored as absolute pixels at ~1200 px) so downscaling does not require
+retuning; glyphs scoring below `min_glyph_match_score` are not forced
 to a letter — icon-only crops become `symbol-1`, `symbol-2`, …) and the
 blink toggle
 rate. Detection re-locates each element inside a search window around its

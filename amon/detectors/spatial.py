@@ -26,9 +26,14 @@ import numpy as np
 
 from amon.detectors import Detector
 from amon.model import Box, CalibrationResult, Frame
+from amon.scale import REFERENCE_WIDTH_PX, of_width, of_width_float
 from amon.stats import robust_threshold
 
 DISTORTION = "spatial/distortion"
+
+# Absolute defaults were authored at REFERENCE_WIDTH_PX; config stores
+# fractions of the processed frame width.
+_W = float(REFERENCE_WIDTH_PX)
 
 
 class SpatialDetector(Detector):
@@ -40,16 +45,16 @@ class SpatialDetector(Detector):
     def default_config(cls) -> dict:
         return {
             "bright_threshold": 220,  # HUD brightness (matches HudDetector)
-            "exclusion_dilate": 21,  # px dilation around HUD pixels
+            "exclusion_dilate_of_width": 21 / _W,  # was 21 px
             "max_corners": 150,
             "corner_quality": 0.03,
-            "corner_min_distance": 7,
+            "corner_min_distance_of_width": 7 / _W,  # was 7 px
             "max_baseline_frames": 40,  # calibration frames kept for the median
-            "fb_max_error": 1.5,  # forward-backward tolerance (px)
+            "fb_max_error_of_width": 1.5 / _W,  # was 1.5 px
             "outlier_rank": 3,  # use the k-th largest displacement
             "sigma_k": 8.0,
-            "floor": 2.5,  # minimum displacement threshold (px)
-            "region_size": 28,  # highlight box size around moved points
+            "floor_of_width": 2.5 / _W,  # was 2.5 px
+            "region_size_of_width": 28 / _W,  # was 28 px
             # Per-anomaly threshold multipliers (float also accepted).
             "tolerance": {"distortion": 1.0},
         }
@@ -61,22 +66,38 @@ class SpatialDetector(Detector):
         self._baseline: Optional[np.ndarray] = None
         self._points: Optional[np.ndarray] = None
         self._last_moved: List[Box] = []
+        self._frame_width = REFERENCE_WIDTH_PX
+
+    def _set_frame_width(self, image: np.ndarray) -> None:
+        self._frame_width = int(image.shape[1])
+
+    def _length_px(self, key: str, *, minimum: int = 1) -> int:
+        return of_width(self.config[key], self._frame_width, minimum=minimum)
+
+    def _length_pxf(self, key: str, *, minimum: float = 0.0) -> float:
+        return of_width_float(
+            self.config[key], self._frame_width, minimum=minimum
+        )
 
     # --- calibration ------------------------------------------------------
     def _calibrate(self, frame: Frame) -> None:
         gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+        self._set_frame_width(gray)
         bright = gray > int(self.config["bright_threshold"])
         self._bright = bright if self._bright is None else (self._bright | bright)
         self._grays.append(gray)
 
     def _finish_calibration(self) -> CalibrationResult:
+        if self._grays:
+            self._set_frame_width(self._grays[0])
         # Subsample stored frames to bound the median computation.
         keep = int(self.config["max_baseline_frames"])
         stride = max(1, len(self._grays) // keep)
         samples = self._grays[::stride]
         self._baseline = np.median(np.stack(samples), axis=0).astype(np.uint8)
 
-        kernel = np.ones((self.config["exclusion_dilate"],) * 2, np.uint8)
+        dilate = max(3, self._length_px("exclusion_dilate_of_width") * 3)
+        kernel = np.ones((dilate, dilate), np.uint8)
         excluded = cv2.dilate(self._bright.astype(np.uint8), kernel)
 
         # Find the corner features in the baseline image
@@ -85,14 +106,16 @@ class SpatialDetector(Detector):
             self._baseline,
             maxCorners=int(self.config["max_corners"]),
             qualityLevel=float(self.config["corner_quality"]),
-            minDistance=int(self.config["corner_min_distance"]),
+            minDistance=self._length_px("corner_min_distance_of_width"),
             mask=(1 - excluded) * 255,
         )
 
         jitter = [self._calculate_keypoint_displacement(g) for g in samples]
         thresholds = {
             DISTORTION: robust_threshold(
-                jitter, self.config["sigma_k"], self.config["floor"]
+                jitter,
+                self.config["sigma_k"],
+                self._length_pxf("floor_of_width"),
             )
         }
         keypoints = [] if self._points is None else self._points.reshape(-1, 2).tolist()
@@ -104,6 +127,7 @@ class SpatialDetector(Detector):
     # --- detection ----------------------------------------------------------
     def _detect(self, frame: Frame) -> Dict[str, float]:
         gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+        self._set_frame_width(gray)
         return {
             DISTORTION: self._calculate_keypoint_displacement(gray, record_regions=True)
         }
@@ -127,7 +151,7 @@ class SpatialDetector(Detector):
         valid = (
             (st_f.ravel() == 1)
             & (st_b.ravel() == 1)
-            & (fb_error < self.config["fb_max_error"])
+            & (fb_error < self._length_pxf("fb_max_error_of_width"))
         )
         if not valid.any():
             return 0.0
@@ -136,10 +160,29 @@ class SpatialDetector(Detector):
         displacement = np.linalg.norm((fwd - self._points).reshape(-1, 2), axis=1)
         displacement[~valid] = 0.0
 
+        # Ignore points under (or next to) bright HUD pixels so overlay
+        # motion/blink cannot register as background distortion.
+        if displacement.any():
+            thr = int(self.config["bright_threshold"])
+            dilate = max(3, self._length_px("exclusion_dilate_of_width") * 3)
+            kernel = np.ones((dilate, dilate), np.uint8)
+            hud = cv2.dilate((gray > thr).astype(np.uint8), kernel)
+            h, w = hud.shape[:2]
+
+            def _on_hud(pts: np.ndarray) -> np.ndarray:
+                rounded = np.round(pts.reshape(-1, 2)).astype(int)
+                flags = np.zeros(len(rounded), dtype=bool)
+                for i, (x, y) in enumerate(rounded):
+                    if 0 <= x < w and 0 <= y < h and hud[y, x]:
+                        flags[i] = True
+                return flags
+
+            displacement[_on_hud(self._points) | _on_hud(fwd)] = 0.0
+
         # Record the regions of the moved keypoints.
         if record_regions:
             threshold = self._thresholds.get(DISTORTION, np.inf)
-            half = int(self.config["region_size"]) // 2
+            half = self._length_px("region_size_of_width") // 2
             self._last_moved = [
                 (int(x) - half, int(y) - half, 2 * half, 2 * half)
                 for (x, y), d in zip(self._points.reshape(-1, 2), displacement)

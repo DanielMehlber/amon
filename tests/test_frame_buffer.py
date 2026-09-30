@@ -134,3 +134,27 @@ class TestOverloadMonitor:
                     clock["t"] = i * 0.1
                     mon.note_emit(dropped_total=i // 20)  # almost no drops
                 assert not warn.called
+
+    def test_silence_when_disabled(self):
+        mon = OverloadMonitor(
+            width=1920,
+            height=1080,
+            source_fps=30.0,
+            window_seconds=5.0,
+            warn_drop_ratio=0.25,
+            warn_interval_seconds=0.0,
+            enabled=False,
+        )
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        with patch("amon.sources.frame_buffer.time.monotonic", side_effect=fake_monotonic):
+            with patch("amon.sources.frame_buffer.log.warning") as warn:
+                dropped = 0
+                for i in range(20):
+                    clock["t"] = i * 0.1
+                    dropped += 3
+                    mon.note_emit(dropped)
+                assert not warn.called

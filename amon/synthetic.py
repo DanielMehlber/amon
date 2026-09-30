@@ -193,28 +193,59 @@ class SyntheticVideo:
 
     @staticmethod
     def _draw_text(img: np.ndarray, text: str, org: Tuple[int, int], scale: float) -> None:
-        """White HUD text using the same TrueType font as glyph matching."""
+        """White HUD text using the same TrueType font as glyph matching.
+
+        Characters are blitted with a fixed 1 px ink gap so that:
+        - OCR can still segment individual glyphs, and
+        - the width-relative merge kernel (15 px @ 1200 → ~4 px @ 320)
+          joins them into one HUD element on the synthetic frame.
+        """
         font_size = max(10, int(round(18 * scale)))
         font = ImageFont.truetype(str(resolve_glyph_font()), size=font_size)
         # OpenCV ``org`` is the baseline; PIL places text at the top-left.
-        top_left = (org[0], max(0, org[1] - font_size))
-        pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        ImageDraw.Draw(pil).text(top_left, text, fill=(255, 255, 255), font=font)
-        img[:] = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
+        top = max(0, org[1] - font_size)
+        canvas = Image.new("L", (img.shape[1], img.shape[0]), 0)
+        # Render far apart first, then pack by ink bounding boxes.
+        glyph_ink: List[Tuple[Image.Image, int, int]] = []
+        for ch in text:
+            # Generous cell so the glyph is never clipped.
+            cell = Image.new("L", (font_size * 2, font_size * 2), 0)
+            ImageDraw.Draw(cell).text((0, 0), ch, fill=255, font=font)
+            bbox = cell.getbbox()
+            if bbox is None:
+                continue
+            cropped = cell.crop(bbox)
+            glyph_ink.append((cropped, bbox[2] - bbox[0], bbox[3] - bbox[1]))
+        x = org[0]
+        for cropped, gw, gh in glyph_ink:
+            canvas.paste(cropped, (x, top))
+            x += gw + 1  # 1 px gap between ink boxes
+        mask = np.asarray(canvas)
+        img[mask > 0] = (255, 255, 255)
 
     @staticmethod
     def _draw_crosshair(
-        img: np.ndarray, center: Tuple[int, int], arm: int = 18, thickness: int = 2
+        img: np.ndarray,
+        center: Tuple[int, int],
+        arm: Optional[int] = None,
+        thickness: int = 2,
     ) -> None:
         """White crosshair (non-text icon) centred on ``center``."""
+        if arm is None:
+            # Keep the icon inside width-relative glyph size gates (~64 px @ 1200).
+            arm = max(4, WIDTH // 50)
         cx, cy = center
         color = (255, 255, 255)
         cv2.line(img, (cx, cy - arm), (cx, cy + arm), color, thickness)
         cv2.line(img, (cx - arm, cy), (cx + arm, cy), color, thickness)
 
     @staticmethod
-    def _draw_dot(img: np.ndarray, center: Tuple[int, int], radius: int = 10) -> None:
+    def _draw_dot(
+        img: np.ndarray, center: Tuple[int, int], radius: Optional[int] = None
+    ) -> None:
         """Filled white disk (non-text icon)."""
+        if radius is None:
+            radius = max(3, WIDTH // 60)
         cv2.circle(img, center, radius, (255, 255, 255), thickness=-1)
 
     def _hud_text(self, spec: HudSpec, active: Set[str]) -> str:
@@ -225,10 +256,12 @@ class SyntheticVideo:
         return spec.text
 
     def _hud_org(self, spec: HudSpec, active: Set[str]) -> Tuple[int, int]:
+        # Shift stays inside the width-relative search margin (~20 px @ 1200).
+        shift = max(2, round(WIDTH * 20 / 1200 * 0.6))
         if spec.key == "cam" and "hud_position" in active:
-            return spec.org[0] + 14, spec.org[1] + 10
+            return spec.org[0] + shift, spec.org[1] + shift
         if spec.key == "temp" and "hud_parallel_position" in active:
-            return spec.org[0] + 14, spec.org[1] + 10
+            return spec.org[0] + shift, spec.org[1] + shift
         return spec.org
 
     def _hud_scale(self, spec: HudSpec, active: Set[str]) -> float:

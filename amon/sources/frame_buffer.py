@@ -141,6 +141,7 @@ class OverloadMonitor:
         window_seconds: float = 5.0,
         warn_drop_ratio: float = 0.25,
         warn_interval_seconds: float = 30.0,
+        enabled: bool = True,
     ):
         self._width = int(width)
         self._height = int(height)
@@ -148,6 +149,7 @@ class OverloadMonitor:
         self._window = float(window_seconds)
         self._warn_ratio = float(warn_drop_ratio)
         self._warn_interval = float(warn_interval_seconds)
+        self._enabled = bool(enabled)
         self._samples: Deque[Tuple[float, int, int]] = deque()  # t, dropped, emitted
         self._last_warn = 0.0
         self._last_dropped = 0
@@ -155,6 +157,8 @@ class OverloadMonitor:
 
     def note_emit(self, dropped_total: int) -> None:
         """Record that one frame was delivered; ``dropped_total`` is cumulative."""
+        if not self._enabled:
+            return
         now = time.monotonic()
         self._emitted += 1
         self._samples.append((now, dropped_total, self._emitted))

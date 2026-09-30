@@ -13,9 +13,12 @@ remains. That median image is the “normal geometry” reference.
 ## Ignoring the HUD (masking)
 
 **Idea:** Any pixel that was ever bright during calibration is treated as
-HUD territory. We **dilate** that mask slightly so anti-aliased edges are
-included, then **exclude** it when placing feature points. HUD motion never
-creates spatial alarms.
+HUD territory. We **dilate** that mask slightly (`exclusion_dilate_of_width
+× frame width`) so anti-aliased edges are included, then **exclude** it when
+placing feature points. HUD motion never creates spatial alarms. Spatial
+pixel knobs (`corner_min_distance_of_width`, `fb_max_error_of_width`,
+`floor_of_width`, `region_size_of_width`) are likewise fractions of the
+processed frame width (authored at ~1200 px).
 
 ## Feature points (Shi–Tomasi corners)
 

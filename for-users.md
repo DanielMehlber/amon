@@ -79,6 +79,7 @@ important keys:
 | `video_source.config.device` | Capture device index or path (stream source). |
 | `video_source.config.processing_fps` | Max FPS delivered to the pipeline (stream and file). |
 | `video_source.config.frame_buffer_size` | Live-stream software buffer (default 1). When full, oldest frames are dropped so a slow pipeline cannot grow RAM. |
+| `video_source.config.warn_on_dropped_frames` | Log a warning when drops are sustained (default `true`). Set `false` to silence it. |
 | `video_source.config.reconnect_attempts` | Live-stream reopen tries after failed reads (default 10). Set `0` to disable. |
 | `video_source.config.realtime` | `true` paces file playback like a live stream. |
 | `preprocessing.scale` | Scale percent of frame size (aspect preserved). |
@@ -150,7 +151,11 @@ preprocessing:
 ```
 
 Order: rotate → scale → brightness/contrast.  Defaults leave the image
-unchanged.
+unchanged.  HUD/spatial sizes that used to be absolute pixels
+(`merge_kernel`, search margins, glyph gates, match distances, …) are now
+fractions of the **processed** frame width (`*_of_width`, areas as
+`*_of_width_sq`), so a 25% scale keeps the same relative merging behaviour
+without retuning.
 
 ### Live video input
 
@@ -160,7 +165,8 @@ are detected automatically; optional `processing_fps` throttles capture.
 A small software buffer (`frame_buffer_size`, default 1) drops the oldest
 frame when the pipeline falls behind so memory cannot grow without bound;
 if that happens often, a warning is logged that the machine may be too
-slow for the current resolution/FPS.  Transient capture failures reopen
+slow for the current resolution/FPS (disable with
+`warn_on_dropped_frames: false`).  Transient capture failures reopen
 the device (`reconnect_attempts`, default 10).  Image transforms (`scale`,
 `rotate`, `brightness`, `contrast`) are set under `preprocessing`.  If the
 device cannot be opened, available alternatives are listed in the error

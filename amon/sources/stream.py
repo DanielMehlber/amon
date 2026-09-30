@@ -150,6 +150,9 @@ class VideoInputStream(VideoSource):
     - ``frame_buffer_size`` (default ``1``): software queue between the
       capture thread and the pipeline.  When full, the oldest frame is
       dropped so the session stays near real time instead of growing RAM.
+    - ``warn_on_dropped_frames`` (default ``true``): log a warning when the
+      pipeline routinely drops frames because it cannot keep up.  Set
+      ``false`` to silence that warning (frames are still dropped).
     - ``reconnect_attempts`` (default ``10``): how many reopen tries after
       consecutive failed reads before the stream gives up.
     - ``reconnect_backoff_seconds`` (default ``1.0``): delay between reopen
@@ -213,6 +216,9 @@ class VideoInputStream(VideoSource):
         if frame_buffer_size < 1:
             raise SourceError("frame_buffer_size must be >= 1")
         self._frame_buffer_size = frame_buffer_size
+        self._warn_on_dropped_frames = bool(
+            self.config.get("warn_on_dropped_frames", True)
+        )
         self._reconnect_attempts = max(
             0, int(self.config.get("reconnect_attempts", 10))
         )
@@ -351,7 +357,8 @@ class VideoInputStream(VideoSource):
 
         A reader thread keeps draining the device so a slow pipeline never
         accumulates an unbounded backlog — oldest buffered frames are discarded
-        when newer ones arrive.  Frequent drops trigger an overload warning.
+        when newer ones arrive.  Frequent drops trigger an overload warning
+        unless ``warn_on_dropped_frames`` is ``false``.
         Transient capture failures trigger reopen attempts before ending.
         """
         buffer = DroppingFrameBuffer(
@@ -365,6 +372,7 @@ class VideoInputStream(VideoSource):
             width=self._native_size[0],
             height=self._native_size[1],
             source_fps=self._native_fps,
+            enabled=self._warn_on_dropped_frames,
         )
         index = 0
         min_interval = 1.0 / self._output_fps if self._output_fps > 0 else 0.0
