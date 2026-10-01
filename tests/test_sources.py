@@ -72,6 +72,105 @@ class TestVideoFileSource:
         with pytest.raises(SourceError, match="processing_fps"):
             VideoFileSource({"path": synthetic_video, "processing_fps": 0})
 
+    def test_realtime_catchup_warns_when_pipeline_lags(self, synthetic_video):
+        """Realtime mode skips ahead when wall time is behind file time."""
+        image = np.zeros((24, 32, 3), dtype=np.uint8)
+        reads = [(True, image)] * 80 + [(False, None)]
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        with patch("cv2.VideoCapture") as capture_cls:
+            _mock_open_capture(
+                capture_cls, width=32, height=24, fps=20.0, read_frames=reads
+            )
+            with patch("amon.sources.file.time.monotonic", side_effect=fake_monotonic):
+                with patch(
+                    "amon.sources.frame_buffer.time.monotonic", side_effect=fake_monotonic
+                ):
+                    with patch("amon.sources.file.time.sleep"):
+                        with patch("amon.sources.frame_buffer.log.warning") as warn:
+                            source = VideoFileSource(
+                                {
+                                    "path": "ignored.avi",
+                                    "realtime": True,
+                                    "fps": 20.0,
+                                    "warn_on_dropped_frames": True,
+                                }
+                            )
+                            frames = []
+                            for frame in source.frames():
+                                frames.append(frame)
+                                if len(frames) == 1:
+                                    # Suddenly fall ~2s behind so the next reads skip ahead.
+                                    clock["t"] = 2.0
+                                else:
+                                    clock["t"] += 0.2  # stay slower than 20 fps
+                                if len(frames) >= 6:
+                                    break
+                            source.close()
+                            assert frames
+                            assert any(f.timestamp >= 2.0 - 1e-6 for f in frames[1:])
+                            assert warn.called
+                            message = warn.call_args[0][0] % warn.call_args[0][1:]
+                            assert "too slow" in message
+
+    def test_realtime_catchup_silent_when_warn_disabled(self, synthetic_video):
+        image = np.zeros((24, 32, 3), dtype=np.uint8)
+        reads = [(True, image)] * 80 + [(False, None)]
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        with patch("cv2.VideoCapture") as capture_cls:
+            _mock_open_capture(
+                capture_cls, width=32, height=24, fps=20.0, read_frames=reads
+            )
+            with patch("amon.sources.file.time.monotonic", side_effect=fake_monotonic):
+                with patch(
+                    "amon.sources.frame_buffer.time.monotonic", side_effect=fake_monotonic
+                ):
+                    with patch("amon.sources.file.time.sleep"):
+                        with patch("amon.sources.frame_buffer.log.warning") as warn:
+                            source = VideoFileSource(
+                                {
+                                    "path": "ignored.avi",
+                                    "realtime": True,
+                                    "fps": 20.0,
+                                    "warn_on_dropped_frames": False,
+                                }
+                            )
+                            frames = []
+                            for frame in source.frames():
+                                frames.append(frame)
+                                if len(frames) == 1:
+                                    clock["t"] = 2.0
+                                else:
+                                    clock["t"] += 0.2
+                                if len(frames) >= 6:
+                                    break
+                            source.close()
+                            assert frames
+                            assert not warn.called
+
+    def test_non_realtime_processing_fps_skips_do_not_warn(self, synthetic_video):
+        """Intentional processing_fps subsample must not fire overload warnings."""
+        with patch("amon.sources.frame_buffer.log.warning") as warn:
+            with VideoFileSource(
+                {
+                    "path": synthetic_video,
+                    "realtime": False,
+                    "processing_fps": FPS / 2.0,
+                    "warn_on_dropped_frames": True,
+                }
+            ) as source:
+                for i, _frame in enumerate(source.frames()):
+                    if i >= 30:
+                        break
+            assert not warn.called
+
 
 def _mock_open_capture(
     capture_cls,

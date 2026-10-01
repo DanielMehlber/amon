@@ -79,7 +79,7 @@ important keys:
 | `video_source.config.device` | Capture device index or path (stream source). |
 | `video_source.config.processing_fps` | Max FPS delivered to the pipeline (stream and file). |
 | `video_source.config.frame_buffer_size` | Live-stream software buffer (default 1). When full, oldest frames are dropped so a slow pipeline cannot grow RAM. |
-| `video_source.config.warn_on_dropped_frames` | Log a warning when drops are sustained (default `true`). Set `false` to silence it. |
+| `video_source.config.warn_on_dropped_frames` | Log a warning when drops are sustained (default `true`). Applies to live capture and to file playback with `realtime: true`. Set `false` to silence it. |
 | `video_source.config.reconnect_attempts` | Live-stream reopen tries after failed reads (default 10). Set `0` to disable. |
 | `video_source.config.realtime` | `true` paces file playback like a live stream. |
 | `preprocessing.scale` | Scale percent of frame size (aspect preserved). |
@@ -171,6 +171,14 @@ the device (`reconnect_attempts`, default 10).  Image transforms (`scale`,
 `rotate`, `brightness`, `contrast`) are set under `preprocessing`.  If the
 device cannot be opened, available alternatives are listed in the error
 message.
+
+### File playback
+
+`realtime: true` paces the file like a live stream.  If monitoring falls
+behind wall-clock time, frames are skipped to catch up and the same
+overload warning can fire (`warn_on_dropped_frames: false` silences it).
+With `realtime: false` (default), the file is processed as fast as
+possible and `processing_fps` skips are intentional — they do not warn.
 
 ## Running a monitoring session
 

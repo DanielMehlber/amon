@@ -18,6 +18,7 @@ video_source:
     realtime: false        # true paces playback like a live stream
     # fps: null            # override broken/missing file FPS metadata
     # processing_fps: 21   # optional cap; skip frames above this rate
+    # warn_on_dropped_frames: true  # realtime catch-up skips; set false to silence
 
 preprocessing:
   # scale: 100             # percent of input size (aspect preserved); 100 = unchanged
@@ -54,8 +55,8 @@ detectors:
       #   visible_fraction: 0.25             # bright-pixel fraction counting as visible
       # ocr:
       #   min_glyph_height_rel: 0.006667     # 8 px @ 1200
-      #   max_glyph_height_rel: 0.08         # 96 px @ 1200
-      #   max_glyph_width_rel: 0.08          # 96 px @ 1200
+      #   max_glyph_height_rel: 0.10         # 120 px @ 1200
+      #   max_glyph_width_rel: 0.10          # 120 px @ 1200
       #   min_glyph_area_rel_sq: 0.000013889 # 20 px² @ 1200
       #   glyph_crop_pad_rel: 0.005          # 6 px @ 1200; OCR margin beyond bright box
       #   min_glyph_match_score: 0.45        # below this → symbol-N, not a forced letter

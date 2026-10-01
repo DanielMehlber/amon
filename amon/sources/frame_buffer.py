@@ -151,7 +151,7 @@ class OverloadMonitor:
         self._warn_interval = float(warn_interval_seconds)
         self._enabled = bool(enabled)
         self._samples: Deque[Tuple[float, int, int]] = deque()  # t, dropped, emitted
-        self._last_warn = 0.0
+        self._last_warn: Optional[float] = None
         self._last_dropped = 0
         self._emitted = 0
 
@@ -166,7 +166,10 @@ class OverloadMonitor:
             self._samples.popleft()
         if len(self._samples) < 2:
             return
-        if now - self._last_warn < self._warn_interval:
+        if (
+            self._last_warn is not None
+            and now - self._last_warn < self._warn_interval
+        ):
             return
 
         t0, d0, e0 = self._samples[0]

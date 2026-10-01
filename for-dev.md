@@ -70,7 +70,9 @@ Implement `fps` and `frames()` (a generator of `Frame` objects), raise
 
 - `VideoFileSource` — pre-recorded files (`amon/sources/file.py`). Optional
   ``processing_fps`` skips frames so the pipeline never sees more than that
-  many frames per second of video time; ``realtime`` paces wall-clock delivery.
+  many frames per second of video time; ``realtime`` paces wall-clock delivery
+  and skips ahead when the pipeline lags (same overload warning as live
+  capture unless ``warn_on_dropped_frames: false``).
 - `VideoInputStream` — live capture devices such as USB adapters or
   capture cards (`amon/sources/stream.py`).  Prefer numeric ``device``
   indices (portable across Linux/macOS/Windows); OpenCV selects the native

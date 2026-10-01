@@ -107,8 +107,8 @@ class HudDetector(Detector):
             },
             "ocr": {
                 "min_glyph_height_rel": 8 / _W,  # was 8 px
-                "max_glyph_height_rel": 96 / _W,  # was 64 px; headroom for size anomalies
-                "max_glyph_width_rel": 96 / _W,  # was 64 px
+                "max_glyph_height_rel": 120 / _W,  # 0.10; was 96/_W (0.08)
+                "max_glyph_width_rel": 120 / _W,  # 0.10; was 96/_W (0.08)
                 "min_glyph_area_rel_sq": 20 / _W2,  # was 20 px²
                 # Extra margin around bright-mask boxes when cropping for OCR so
                 # anti-aliased glyph edges (often < bright_threshold) are not cut
